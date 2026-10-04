@@ -127,6 +127,9 @@
     display:inline-block; background:#E8EFE9; color:var(--fairway); font-size:11px; font-weight:600;
     padding:1px 8px; border-radius:999px; vertical-align:middle; margin-left:4px;
   }
+  .ts-comms-notice{ margin-top:8px; padding:8px 10px; border-radius:8px; font-size:13px; }
+  .ts-comms-notice.ok{ background:#E8EFE9; color:var(--fairway); }
+  .ts-comms-notice.warn{ background:#FBEFD5; color:#7a5a12; }
   .ts-comms-aud-label{ display:block; font-size:12.5px; font-weight:600; color:#6b6a5e; margin-bottom:4px; }
   .ts-comms-btn{
     background:var(--fairway); color:var(--ivory); border:none; padding:9px 16px; border-radius:8px;
@@ -1396,6 +1399,7 @@
   let commsMessages = [];
   let commsLoaded = false;
   let commsPosting = false;
+  let commsNotice = null;         // one-time note shown after posting a topic: { ok, text }
   let commsSnapshotSeen = null;   // "seen" time as of when the Communications tab was opened (for NEW markers)
   let commsExpanded = new Set();
   let commsDrafts = { newTitle: '', newBody: '', audience: 'roster', replies: {} };
@@ -1475,7 +1479,7 @@
           const err = new Error(parsed.error); err.final = true; throw err;
         }
         if(parsed && Array.isArray(parsed.messages)) commsAdoptMessages(parsed.messages);
-        return { ok: true };
+        return { ok: true, emailed: parsed ? parsed.emailed : undefined, emailNote: parsed ? parsed.emailNote : '', isTopic: !!(parsed && parsed.isTopic) };
       }catch(e){
         lastError = e;
         if(e.final) break;
@@ -1596,6 +1600,7 @@
         </select>
         <input type="text" id="ts-comms-new-title" maxlength="120" placeholder="Topic title" class="ts-comms-input">
         <textarea id="ts-comms-new-body" rows="3" maxlength="2000" placeholder="What would you like to say?" class="ts-comms-input" style="margin-top:8px;"></textarea>
+        ${commsNotice ? `<div class="ts-comms-notice ${commsNotice.ok ? 'ok' : 'warn'}">${esc(commsNotice.text)}</div>` : ''}
         <div style="margin-top:8px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
           <button type="button" class="ts-comms-btn" id="ts-comms-post">Post topic</button>
           ${canEmail
@@ -1662,6 +1667,10 @@
     if(r.ok){
       commsDrafts.newTitle = ''; commsDrafts.newBody = '';
       commsDrafts.audience = 'roster';
+      if(r.isTopic){
+        if(r.emailed > 0) commsNotice = { ok: true, text: 'Posted. Emailed ' + r.emailed + ' ' + (r.emailed === 1 ? 'person' : 'people') + '.' };
+        else commsNotice = { ok: false, text: 'Posted in the app, but no email was sent: ' + (r.emailNote || 'unknown reason') + '.' };
+      }
       commsExpanded.add(id);
     }
     renderCommsPanel(document.getElementById('ts-comms-panel') || el);
@@ -7357,7 +7366,7 @@ function computedCourseHandicap(indexVal, tee){
     document.querySelectorAll('[data-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
         const tab = btn.getAttribute('data-tab');
-        if(tab !== 'comms') commsSnapshotSeen = null;
+        if(tab !== 'comms'){ commsSnapshotSeen = null; commsNotice = null; }
         activeSection = tab;
         render();
         if(tab === 'comms') commsFetch().then(changed => { const pn = document.getElementById('ts-comms-panel'); if(changed && activeSection === 'comms' && pn) renderCommsPanel(pn); });

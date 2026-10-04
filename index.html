@@ -1716,7 +1716,7 @@
     commsUpdateBadge();
   }
 
-  let data = { roster: [], signups: {}, duty: {}, closures: {}, notices: {}, swapRequests: {}, confirmedTeeTimes: {}, teamsTeeTimesOverride: {}, teeTimeSchedule: {}, teeRatings: {}, teeOptions: [], teams: {}, rounds: {}, playingGroups: {}, holeHandicaps: {}, holeHandicapsRed: {"1":7,"2":17,"3":13,"4":3,"5":9,"6":1,"7":5,"8":15,"9":11,"10":8,"11":10,"12":16,"13":2,"14":4,"15":6,"16":14,"17":18,"18":12}, holePars: {}, adminPin: null, guestPin: '3672', playerPins: {}, activityLog: [], payments: [], moneyStatusStartDate: null, extraReminderEmails: ['rdelfs@theheritageclub.net','rsatterwhite@theheritageclub.net','stevekirchhoff52@gmail.com','rtleene@aol.com'] };
+  let data = { roster: [], signups: {}, duty: {}, closures: {}, notices: {}, swapRequests: {}, confirmedTeeTimes: {}, teamsTeeTimesOverride: {}, teeTimeSchedule: {}, teeRatings: {}, teeOptions: [], teams: {}, rounds: {}, playingGroups: {}, holeHandicaps: {}, holeHandicapsRed: {"1":7,"2":17,"3":13,"4":3,"5":9,"6":1,"7":5,"8":15,"9":11,"10":8,"11":10,"12":16,"13":2,"14":4,"15":6,"16":14,"17":18,"18":12}, holePars: {}, adminPin: null, guestPin: '3672', playerPins: {}, activityLog: [], payments: [], moneyStatusStartDate: null, extraReminderEmails: ['stevekirchhoff52@gmail.com','rtleene@aol.com'], proShopEmails: ['rdelfs@theheritageclub.net','rsatterwhite@theheritageclub.net'] };
   // Set when the very first load couldn't reach the backend at all (network hiccup,
   // or the fetch timing out per FETCH_TIMEOUT_MS above) — distinct from a
   // successful load that happens to find an empty roster, so init() can show a
@@ -2063,6 +2063,13 @@
     // hardcoded on the backend (Code.gs SIGNUP_REMINDER_EXTRA_EMAILS); from
     // then on it's just a normal saved value, editable from Admin > Reminders.
     if(!data.extraReminderEmails) data.extraReminderEmails = ['rdelfs@theheritageclub.net','rsatterwhite@theheritageclub.net','stevekirchhoff52@gmail.com','rtleene@aol.com'];
+    // Pro shop addresses have their own list now (Admin > Reminders > Pro shop).
+    // First load moves them out of "extra recipients" so nobody is listed twice.
+    if(!data.proShopEmails){
+      data.proShopEmails = ['rdelfs@theheritageclub.net','rsatterwhite@theheritageclub.net'];
+      const psLow = data.proShopEmails.map(a => a.toLowerCase());
+      data.extraReminderEmails = data.extraReminderEmails.filter(a => psLow.indexOf(String(a).toLowerCase()) === -1);
+    }
     if(typeof data._lastModified !== 'number') data._lastModified = 0;
     lastKnownModified = data._lastModified;
     const removedGhosts = normalizeSignups();
@@ -5032,11 +5039,23 @@ function computedCourseHandicap(indexVal, tee){
     const recipientRowsHtml = (data.extraReminderEmails || []).map(addr =>
       `<div class="ts-closure-row"><span class="ts-closure-date">${esc(addr)}</span><button data-remove-reminder-email="${esc(addr)}">Remove</button></div>`
     ).join('');
+    const proShopRowsHtml = (data.proShopEmails || []).map(addr =>
+      `<div class="ts-closure-row"><span class="ts-closure-date">${esc(addr)}</span><button data-remove-proshop-email="${esc(addr)}">Remove</button></div>`
+    ).join('');
     el.innerHTML = `
       <div class="ts-roster-panel">
         <div class="ts-import-row ts-ci-section" style="margin-top:0; padding-top:0; border-top:none;">
+          <span class="ts-import-row-label">Pro shop</span>
+          <p style="margin:0 0 10px;">Pro shop staff. They get the nightly "playing tomorrow" email, the "please cancel our last tee time" email when a drop-out leaves a spare tee time, and Communications topics sent to "Everyone". Add, change or remove addresses here (to change one, remove it and add the new one).</p>
+          ${proShopRowsHtml || '<p class="ts-empty">No pro shop addresses yet. The cancel-a-tee-time email will not be sent until you add one.</p>'}
+          <div class="ts-add-row" style="margin-top:10px;">
+            <input type="email" placeholder="name@example.com" id="ts-new-proshop-email">
+            <button id="ts-add-proshop-email">Add</button>
+          </div>
+        </div>
+        <div class="ts-import-row ts-ci-section">
           <span class="ts-import-row-label">Extra recipients</span>
-          <p style="margin:0 0 10px;">Everyone on the roster with an email on file already gets the automatic "playing tomorrow" email every night before a play day. Add anyone else who should get it too — pro shop staff, etc.</p>
+          <p style="margin:0 0 10px;">Everyone on the roster with an email on file already gets the automatic "playing tomorrow" email every night before a play day. Add anyone else who should get it too (not pro shop staff, who are listed above). They also get Communications topics sent to "Everyone".</p>
           ${recipientRowsHtml || '<p class="ts-empty">No extra recipients yet.</p>'}
           <div class="ts-add-row" style="margin-top:10px;">
             <input type="email" placeholder="name@example.com" id="ts-new-reminder-email">
@@ -6736,11 +6755,47 @@ function computedCourseHandicap(indexVal, tee){
           await showMessage('Already on the list', `${val} is already getting the reminder.`);
           return;
         }
+        if((data.proShopEmails || []).some(e => e.toLowerCase() === val.toLowerCase())){
+          await showMessage('Already on the list', `${val} is already a pro shop address.`);
+          return;
+        }
         data.extraReminderEmails.push(val);
         await saveData();
         render();
       };
     }
+    const addProShopBtn = document.getElementById('ts-add-proshop-email');
+    if(addProShopBtn){
+      addProShopBtn.onclick = async () => {
+        if(!isAdmin) return;
+        const input = document.getElementById('ts-new-proshop-email');
+        const val = (input && input.value || '').trim();
+        if(!val) return;
+        if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)){
+          await showMessage('Not a valid email', 'Enter a full email address like name@example.com.');
+          return;
+        }
+        if(!data.proShopEmails) data.proShopEmails = [];
+        if(data.proShopEmails.some(e => e.toLowerCase() === val.toLowerCase())){
+          await showMessage('Already on the list', `${val} is already a pro shop address.`);
+          return;
+        }
+        data.proShopEmails.push(val);
+        // Keep an address in one list only.
+        data.extraReminderEmails = (data.extraReminderEmails || []).filter(e => e.toLowerCase() !== val.toLowerCase());
+        await saveData();
+        render();
+      };
+    }
+    document.querySelectorAll('[data-remove-proshop-email]').forEach(btn => {
+      btn.onclick = async () => {
+        if(!isAdmin) return;
+        const addr = btn.getAttribute('data-remove-proshop-email');
+        data.proShopEmails = (data.proShopEmails || []).filter(e => e !== addr);
+        await saveData();
+        render();
+      };
+    });
     document.querySelectorAll('[data-remove-reminder-email]').forEach(btn => {
       btn.onclick = async () => {
         if(!isAdmin) return;

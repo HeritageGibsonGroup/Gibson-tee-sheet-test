@@ -107,6 +107,52 @@
     cursor:pointer; padding:14px 8px; color:var(--fairway);
     box-shadow:0 2px 6px rgba(27,67,50,0.06); transition:all .15s ease;
   }
+  .ts-tab{ position:relative; }
+  .ts-tab{ min-width:0; }
+  #ts-comms-panel{ margin-top:14px; }
+  @media (max-width:640px){
+    .ts-tabbar{ flex-wrap:wrap; gap:8px; }
+    .ts-tab{ flex:1 1 calc(33.333% - 8px); padding:10px 4px; }
+    .ts-tab-icon{ font-size:22px; }
+  }
+  .ts-tab-badge{
+    position:absolute; top:6px; right:8px; min-width:20px; padding:1px 6px; border-radius:999px;
+    background:#B3261E; color:#fff; font-size:11.5px; font-weight:700; text-align:center; line-height:17px;
+  }
+  .ts-comms-input{
+    width:100%; font-family:'Inter',sans-serif; font-size:14px; padding:9px 11px; border-radius:8px;
+    border:1px solid var(--ivory-line); box-sizing:border-box; resize:vertical;
+  }
+  .ts-comms-btn{
+    background:var(--fairway); color:var(--ivory); border:none; padding:9px 16px; border-radius:8px;
+    font-size:13.5px; font-weight:600; cursor:pointer;
+  }
+  .ts-comms-btn:disabled{ opacity:.55; cursor:default; }
+  .ts-comms-head{
+    display:flex; flex-direction:column; align-items:flex-start; gap:3px; width:100%; text-align:left;
+    background:none; border:none; padding:13px 15px; cursor:pointer; font-family:'Inter',sans-serif;
+  }
+  .ts-comms-head:hover{ background:#FBFAF5; }
+  .ts-comms-title{ font-size:15px; font-weight:700; color:var(--fairway); }
+  .ts-comms-sub{ font-size:12px; color:#6b6a5e; }
+  .ts-comms-preview{ font-size:13px; color:#3d3c34; }
+  .ts-comms-new{
+    display:inline-block; background:var(--brass); color:#fff; font-size:10.5px; font-weight:700;
+    padding:1px 7px; border-radius:999px; vertical-align:middle; margin-left:4px; letter-spacing:.03em;
+  }
+  .ts-comms-body{ border-top:1px solid var(--ivory-line); padding:6px 15px 14px; }
+  .ts-comms-msg{ padding:10px 0; border-bottom:1px dashed var(--ivory-line); }
+  .ts-comms-msg.root .ts-comms-msg-body{ font-size:14.5px; }
+  .ts-comms-msg-meta{ font-size:12px; color:#6b6a5e; margin-bottom:3px; }
+  .ts-comms-msg-body{ font-size:14px; line-height:1.45; word-wrap:break-word; overflow-wrap:anywhere; }
+  .ts-comms-del{
+    background:none; border:none; color:#B3261E; font-size:12px; cursor:pointer; margin-left:8px; padding:0; text-decoration:underline;
+  }
+  .ts-comms-reply{ display:flex; gap:8px; align-items:flex-end; margin-top:12px; }
+  .ts-comms-reply textarea{
+    flex:1; font-family:'Inter',sans-serif; font-size:14px; padding:8px 10px; border-radius:8px;
+    border:1px solid var(--ivory-line); resize:vertical;
+  }
   .ts-tab-icon{ font-size:26px; line-height:1; }
   .ts-tab-label{ font-size:13px; font-weight:700; text-align:center; }
   .ts-tab.active{ background:var(--fairway); color:var(--ivory); border-color:var(--fairway); box-shadow:0 4px 14px rgba(27,67,50,0.22); }
@@ -794,7 +840,7 @@
   const GOLF_TOMORROW_EXTRA_CC = ['stevekirchhoff52@gmail.com', 'rtleene@aol.com'];
   const BOOKING_WINDOW_DAYS = 14; // club allows booking 2 weeks ahead
   const WEEKS_AHEAD = 52;
-  const VERSION_DATE = 'September 26, 2026'; // update this each time a change is promoted to live
+  const VERSION_DATE = 'October 4, 2026'; // update this each time a change is promoted to live
   const PLAY_DOWS = [1,3,5]; // Mon, Wed, Fri
   const HOLES_CYCLE = ['18','F9','B9'];
   const HOLES_LABEL = { '18': '18 holes', 'F9': 'Front 9', 'B9': 'Back 9' };
@@ -1279,7 +1325,289 @@
     return false;
   }
 
-  let data = { roster: [], signups: {}, duty: {}, closures: {}, notices: {}, swapRequests: {}, confirmedTeeTimes: {}, teamsTeeTimesOverride: {}, teeTimeSchedule: {}, teeRatings: {}, teeOptions: [], teams: {}, rounds: {}, playingGroups: {}, holeHandicaps: {}, holeHandicapsRed: {"1":7,"2":17,"3":13,"4":3,"5":9,"6":1,"7":5,"8":15,"9":11,"10":8,"11":10,"12":16,"13":2,"14":4,"15":6,"16":14,"17":18,"18":12}, holePars: {}, adminPin: null, guestPin: '3672', playerPins: {}, activityLog: [], payments: [], extraReminderEmails: ['rdelfs@theheritageclub.net','rsatterwhite@theheritageclub.net','stevekirchhoff52@gmail.com','rtleene@aol.com'] };
+  // ---------------------------------------------------------------------
+  // COMMUNICATIONS (message board). Messages live in their own Sheet tab on
+  // the backend (not in the big data blob), fetched with get_comms and
+  // changed only through post_comms / delete_comms. A "topic" has replies
+  // under it. Unread tracking is per device, per player (localStorage).
+  // ---------------------------------------------------------------------
+  const COMMS_SEEN_KEY = IS_LIVE_ENV ? 'golf-league-comms-seen' : 'golf-league-comms-seen-TEST';
+  let commsMessages = [];
+  let commsLoaded = false;
+  let commsPosting = false;
+  let commsSnapshotSeen = null;   // "seen" time as of when the Communications tab was opened (for NEW markers)
+  let commsExpanded = new Set();
+  let commsDrafts = { newTitle: '', newBody: '', replies: {} };
+  let commsTickCount = 0;
+
+  function commsReadSeenMap(){
+    try{ return JSON.parse(localStorage.getItem(COMMS_SEEN_KEY) || '{}') || {}; }catch(e){ return {}; }
+  }
+  function commsSeenAt(){
+    if(!meId) return null;
+    const v = commsReadSeenMap()[meId];
+    return typeof v === 'number' ? v : null;
+  }
+  function commsSetSeenAt(ts){
+    if(!meId) return;
+    try{
+      const m = commsReadSeenMap();
+      if(typeof m[meId] === 'number' && m[meId] >= ts) return;
+      m[meId] = ts;
+      localStorage.setItem(COMMS_SEEN_KEY, JSON.stringify(m));
+    }catch(e){}
+  }
+  function commsLatestTs(){
+    return commsMessages.reduce((mx, m) => Math.max(mx, m.createdAt || 0), 0);
+  }
+  function commsUnreadCount(){
+    if(!meId || !commsLoaded) return 0;
+    const seen = commsSeenAt();
+    if(seen === null) return 0;
+    return commsMessages.filter(m => m.authorId !== meId && (m.createdAt || 0) > seen).length;
+  }
+  function commsUpdateBadge(){
+    const n = commsUnreadCount();
+    const badge = document.getElementById('ts-comms-badge');
+    if(!badge) return;
+    badge.textContent = n > 99 ? '99+' : String(n);
+    badge.style.display = (n > 0 && activeSection !== 'comms') ? 'inline-block' : 'none';
+  }
+  function commsBadgeHtml(){
+    const n = commsUnreadCount();
+    return `<span class="ts-tab-badge" id="ts-comms-badge" style="display:${(n > 0 && activeSection !== 'comms') ? 'inline-block' : 'none'};">${n > 99 ? '99+' : n}</span>`;
+  }
+  function commsAdoptMessages(list){
+    if(!Array.isArray(list)) return false;
+    const before = commsMessages.map(m => m.id).join(',');
+    commsMessages = list;
+    const firstLoad = !commsLoaded;
+    commsLoaded = true;
+    // A device that has never opened Communications starts "caught up" — old
+    // messages don't all show up as unread the first time.
+    if(meId && commsSeenAt() === null) commsSetSeenAt(Math.max(commsLatestTs(), Date.now() - 1000));
+    return firstLoad || before !== list.map(m => m.id).join(',');
+  }
+  async function commsFetch(){
+    try{
+      const res = await fetchWithTimeout(`${BACKEND_URL}?key=${encodeURIComponent(BACKEND_KEY)}&action=get_comms`);
+      const parsed = JSON.parse(await res.text());
+      if(!parsed || parsed.error || !Array.isArray(parsed.messages)) return false;
+      return commsAdoptMessages(parsed.messages);
+    }catch(e){ return false; }
+  }
+  async function commsRequest(action, payload){
+    const url = `${BACKEND_URL}?key=${encodeURIComponent(BACKEND_KEY)}&action=${action}`;
+    const maxAttempts = 3;
+    let lastError = null;
+    for(let attempt = 1; attempt <= maxAttempts; attempt++){
+      try{
+        const res = await fetchWithTimeout(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload)
+        });
+        const parsed = JSON.parse(await res.text());
+        if(parsed && parsed.error){
+          // A deliberate refusal (too long, topic removed, not allowed) would
+          // fail identically every time — don't retry it.
+          const err = new Error(parsed.error); err.final = true; throw err;
+        }
+        if(parsed && Array.isArray(parsed.messages)) commsAdoptMessages(parsed.messages);
+        return { ok: true };
+      }catch(e){
+        lastError = e;
+        if(e.final) break;
+        if(attempt < maxAttempts) await new Promise(r => setTimeout(r, 400 * attempt));
+      }
+    }
+    await showMessage("Didn't go through", (lastError && lastError.message) || 'Something went wrong reaching the server. Your text is still in the box — try again in a moment.');
+    return { ok: false };
+  }
+  function commsNewId(){
+    return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+  function commsTime(ts){
+    try{ return new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+    catch(e){ return ''; }
+  }
+  function commsTextHtml(s){
+    return esc(String(s || ''))
+      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>')
+      .replace(/\n/g, '<br>');
+  }
+  function commsThreads(){
+    const roots = commsMessages.filter(m => m.threadId === m.id);
+    const byThread = {};
+    commsMessages.forEach(m => { if(m.threadId !== m.id){ (byThread[m.threadId] = byThread[m.threadId] || []).push(m); } });
+    return roots.map(root => {
+      const replies = (byThread[root.id] || []).slice().sort((a, b) => a.createdAt - b.createdAt);
+      const last = replies.length ? replies[replies.length - 1] : root;
+      return { root, replies, lastTs: last.createdAt, last };
+    }).sort((a, b) => b.lastTs - a.lastTs);
+  }
+  function commsMessageHtml(m, isRoot, seenSnap, canDelete){
+    const isNew = m.authorId !== meId && seenSnap !== null && (m.createdAt || 0) > seenSnap;
+    return `
+      <div class="ts-comms-msg ${isRoot ? 'root' : ''}">
+        <div class="ts-comms-msg-meta">
+          <strong>${esc(m.authorName)}</strong> · ${esc(commsTime(m.createdAt))}
+          ${isNew ? '<span class="ts-comms-new">NEW</span>' : ''}
+          ${canDelete ? `<button type="button" class="ts-comms-del" data-comms-del="${esc(m.id)}">Delete</button>` : ''}
+        </div>
+        <div class="ts-comms-msg-body">${commsTextHtml(m.body)}</div>
+      </div>`;
+  }
+  function renderCommsPanel(el){
+    if(!el) return;
+    const me = meId ? data.roster.find(p => p.id === meId) : null;
+    if(!me){
+      el.innerHTML = `<div class="ts-card" style="padding:18px;"><h3 style="margin:0 0 8px; font-family:'Fraunces',serif; color:var(--fairway);">Communications</h3>
+        <p style="margin:0; font-size:14px;">Pick your name in the <strong>I'm —</strong> menu at the top of the page to read and post messages.</p></div>`;
+      return;
+    }
+    if(commsSnapshotSeen === null) commsSnapshotSeen = commsSeenAt();
+    const threads = commsThreads();
+    const seenSnap = commsSnapshotSeen;
+    const canEmail = !!me.email;
+    const emailOn = me.commsEmail !== false;
+    const threadHtml = threads.map(t => {
+      const open = commsExpanded.has(t.root.id);
+      const unreadInThread = seenSnap !== null && [t.root].concat(t.replies).some(m => m.authorId !== meId && (m.createdAt || 0) > seenSnap);
+      const canDeleteRoot = t.root.authorId === meId || isAdmin;
+      const preview = t.last.body.replace(/\s+/g, ' ').slice(0, 90);
+      return `
+        <div class="ts-card ts-comms-thread" data-comms-thread="${esc(t.root.id)}">
+          <button type="button" class="ts-comms-head" data-comms-toggle="${esc(t.root.id)}" aria-expanded="${open}">
+            <span class="ts-comms-title">${esc(t.root.title)} ${unreadInThread ? '<span class="ts-comms-new">NEW</span>' : ''}</span>
+            <span class="ts-comms-sub">${esc(t.root.authorName)} · ${t.replies.length} repl${t.replies.length === 1 ? 'y' : 'ies'} · last activity ${esc(commsTime(t.lastTs))}</span>
+            ${open ? '' : `<span class="ts-comms-preview">${esc(t.last.authorName)}: ${esc(preview)}${t.last.body.length > 90 ? '…' : ''}</span>`}
+          </button>
+          ${open ? `
+            <div class="ts-comms-body">
+              ${commsMessageHtml(t.root, true, seenSnap, canDeleteRoot)}
+              ${t.replies.map(r => commsMessageHtml(r, false, seenSnap, r.authorId === meId || isAdmin)).join('')}
+              <div class="ts-comms-reply">
+                <textarea data-comms-reply-box="${esc(t.root.id)}" rows="2" maxlength="2000" placeholder="Write a reply…"></textarea>
+                <button type="button" class="ts-comms-btn" data-comms-reply="${esc(t.root.id)}">Reply</button>
+              </div>
+            </div>` : ''}
+        </div>`;
+    }).join('');
+    el.innerHTML = `
+      <div class="ts-card" style="padding:16px 18px;">
+        <h3 style="margin:0 0 4px; font-family:'Fraunces',serif; color:var(--fairway);">Communications</h3>
+        <p style="margin:0 0 12px; font-size:13px; color:#6b6a5e;">Start a topic for the whole league; anyone can reply. New topics are also emailed to everyone.</p>
+        <input type="text" id="ts-comms-new-title" maxlength="120" placeholder="Topic title" class="ts-comms-input">
+        <textarea id="ts-comms-new-body" rows="3" maxlength="2000" placeholder="What would you like to say?" class="ts-comms-input" style="margin-top:8px;"></textarea>
+        <div style="margin-top:8px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <button type="button" class="ts-comms-btn" id="ts-comms-post">Post topic</button>
+          ${canEmail
+            ? `<label style="font-size:12.5px; color:#6b6a5e; display:flex; align-items:center; gap:6px;"><input type="checkbox" id="ts-comms-email-pref" ${emailOn ? 'checked' : ''}> Email me about new topics</label>`
+            : `<span style="font-size:12.5px; color:#6b6a5e;">No email address on file for you — ask an admin to add one if you want emails about new topics.</span>`}
+        </div>
+      </div>
+      ${commsLoaded ? (threadHtml || '<p style="font-size:14px; color:#6b6a5e; padding:6px 4px;">No topics yet — be the first to post.</p>') : '<p style="font-size:14px; color:#6b6a5e; padding:6px 4px;">Loading messages…</p>'}`;
+
+    // Restore anything typed before a redraw.
+    const titleEl = document.getElementById('ts-comms-new-title');
+    const bodyEl = document.getElementById('ts-comms-new-body');
+    titleEl.value = commsDrafts.newTitle;
+    bodyEl.value = commsDrafts.newBody;
+    titleEl.addEventListener('input', () => { commsDrafts.newTitle = titleEl.value; });
+    bodyEl.addEventListener('input', () => { commsDrafts.newBody = bodyEl.value; });
+    el.querySelectorAll('[data-comms-reply-box]').forEach(box => {
+      const tid = box.getAttribute('data-comms-reply-box');
+      box.value = commsDrafts.replies[tid] || '';
+      box.addEventListener('input', () => { commsDrafts.replies[tid] = box.value; });
+    });
+    el.querySelectorAll('[data-comms-toggle]').forEach(btn => {
+      btn.onclick = () => {
+        const tid = btn.getAttribute('data-comms-toggle');
+        if(commsExpanded.has(tid)) commsExpanded.delete(tid); else commsExpanded.add(tid);
+        renderCommsPanel(el);
+      };
+    });
+    document.getElementById('ts-comms-post').onclick = () => commsSubmitTopic(el);
+    el.querySelectorAll('[data-comms-reply]').forEach(btn => {
+      btn.onclick = () => commsSubmitReply(el, btn.getAttribute('data-comms-reply'));
+    });
+    el.querySelectorAll('[data-comms-del]').forEach(btn => {
+      btn.onclick = () => commsDelete(el, btn.getAttribute('data-comms-del'));
+    });
+    const pref = document.getElementById('ts-comms-email-pref');
+    if(pref){
+      pref.onchange = async () => {
+        if(pref.checked){ delete me.commsEmail; } else { me.commsEmail = false; }
+        await saveData();
+      };
+    }
+    // Everything currently on screen counts as read once the tab is showing.
+    if(commsLoaded && activeSection === 'comms'){
+      commsSetSeenAt(commsLatestTs());
+      commsUpdateBadge();
+    }
+  }
+  async function commsSubmitTopic(el){
+    if(commsPosting) return;
+    const title = commsDrafts.newTitle.trim();
+    const body = commsDrafts.newBody.trim();
+    if(!title){ await showMessage('Add a title', 'Give your topic a short title first.'); return; }
+    if(!body){ await showMessage('Add a message', 'Write something under the title first.'); return; }
+    commsPosting = true;
+    const btn = document.getElementById('ts-comms-post');
+    if(btn) btn.disabled = true;
+    const id = commsNewId();
+    const r = await commsRequest('post_comms', { message: { id, authorId: meId, title, body } });
+    commsPosting = false;
+    if(r.ok){
+      commsDrafts.newTitle = ''; commsDrafts.newBody = '';
+      commsExpanded.add(id);
+    }
+    renderCommsPanel(document.getElementById('ts-comms-panel') || el);
+  }
+  async function commsSubmitReply(el, threadId){
+    if(commsPosting) return;
+    const body = (commsDrafts.replies[threadId] || '').trim();
+    if(!body){ await showMessage('Add a message', 'Write your reply first.'); return; }
+    commsPosting = true;
+    const id = commsNewId();
+    const r = await commsRequest('post_comms', { message: { id, threadId, authorId: meId, body } });
+    commsPosting = false;
+    if(r.ok) delete commsDrafts.replies[threadId];
+    renderCommsPanel(document.getElementById('ts-comms-panel') || el);
+  }
+  async function commsDelete(el, id){
+    const m = commsMessages.find(x => x.id === id);
+    if(!m) return;
+    const isRoot = m.threadId === m.id;
+    const ok = await askConfirm(isRoot ? 'Delete this topic?' : 'Delete this reply?',
+      isRoot ? 'The topic and all of its replies will be removed for everyone.' : 'This reply will be removed for everyone.',
+      'Delete', 'Keep');
+    if(!ok) return;
+    await commsRequest('delete_comms', { id, requesterId: meId });
+    renderCommsPanel(document.getElementById('ts-comms-panel') || el);
+  }
+  // Background refresh: every 30s while Communications is open (so replies
+  // appear on their own), every ~90s otherwise (just to keep the unread badge
+  // honest). Never redraws while someone is typing in the panel.
+  async function commsTick(){
+    if(!meId || document.hidden) return;
+    commsTickCount++;
+    const viewing = activeSection === 'comms';
+    if(!viewing && commsTickCount % 3 !== 0) return;
+    const changed = await commsFetch();
+    if(!changed) return;
+    if(viewing){
+      const panel = document.getElementById('ts-comms-panel');
+      const a = document.activeElement;
+      const typing = panel && a && panel.contains(a) && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA');
+      if(panel && !typing) renderCommsPanel(panel);
+    }
+    commsUpdateBadge();
+  }
+
+  let data = { roster: [], signups: {}, duty: {}, closures: {}, notices: {}, swapRequests: {}, confirmedTeeTimes: {}, teamsTeeTimesOverride: {}, teeTimeSchedule: {}, teeRatings: {}, teeOptions: [], teams: {}, rounds: {}, playingGroups: {}, holeHandicaps: {}, holeHandicapsRed: {"1":7,"2":17,"3":13,"4":3,"5":9,"6":1,"7":5,"8":15,"9":11,"10":8,"11":10,"12":16,"13":2,"14":4,"15":6,"16":14,"17":18,"18":12}, holePars: {}, adminPin: null, guestPin: '3672', playerPins: {}, activityLog: [], payments: [], moneyStatusStartDate: null, extraReminderEmails: ['rdelfs@theheritageclub.net','rsatterwhite@theheritageclub.net','stevekirchhoff52@gmail.com','rtleene@aol.com'] };
   // Set when the very first load couldn't reach the backend at all (network hiccup,
   // or the fetch timing out per FETCH_TIMEOUT_MS above) — distinct from a
   // successful load that happens to find an empty roster, so init() can show a
@@ -1302,7 +1630,7 @@
   let isGuestVerified = false;
   let expanded = {};
   let expandCollapseState = null; // 'expand' | 'collapse' | null — just for the subtle indicator
-  let activeSection = 'schedule'; // 'schedule' | 'duty' | 'handicaps' | 'scoring' | 'admin'
+  let activeSection = 'schedule'; // 'schedule' | 'duty' | 'handicaps' | 'scoring' | 'comms' | 'admin'
   let adminSubTab = 'roster'; // 'roster' | 'closures' | 'pastDuty' | 'activityLog' | 'data' | 'reminders' | 'handicaps'
   let scoringSelectedDate = null; // dateKey currently shown on the Scoring & Bets tab — always the upcoming round unless reviewDateKey (below) pins it to a past one
   // Set by "Review prior rounds" — null means Scoring & Bets always follows
@@ -1379,8 +1707,8 @@
     if((handicapDraft.effectiveDate || '') !== (data.handicapEffectiveDate || '')) return true;
     for(const pid in handicapDraft.values){
       const player = data.roster.find(p => p.id === pid);
-      const currentVal = player && typeof player.handicapIndex === 'number' ? String(player.handicapIndex) : '';
-      if(handicapDraft.values[pid].trim() !== currentVal) return true;
+      const currentVal = player && typeof player.handicapIndex === 'number' ? fmtHI(player.handicapIndex) : '';
+      if(normHI(handicapDraft.values[pid]) !== currentVal) return true;
     }
     return false;
   }
@@ -1613,6 +1941,13 @@
     if(typeof data.adminPin === 'undefined') data.adminPin = null;
     if(!data.guestPin) data.guestPin = '3672';
     if(!data.activityLog) data.activityLog = [];
+    // Money Status can be told to only count rounds from a chosen date forward
+    // (see computeMoneyStatus) — e.g. so turning the feature on for the first
+    // time doesn't dump the whole season's already-settled results on everyone
+    // at once. null means "count every round," same as before this existed.
+    // Older rounds still show fine everywhere else (Scoreboard, review) either
+    // way — this only affects the Money Status roll-up.
+    if(typeof data.moneyStatusStartDate === 'undefined') data.moneyStatusStartDate = null;
     // Non-roster addresses that get the "playing tomorrow" reminder alongside
     // every roster player with an email on file — pro shop staff, etc. Seeded
     // once, the first time this field ever loads, with whatever was already
@@ -2306,7 +2641,16 @@
   // snapshot still writes each tee's Course Handicap straight from the imported
   // table, since that's presumed authoritative over anything computed here.
   const COURSE_PAR = 72;
-  function computedCourseHandicap(indexVal, tee){
+  // Handicap Index is always shown with exactly one decimal (12 -> "12.0").
+function fmtHI(v){ return (typeof v === 'number' && !isNaN(v)) ? v.toFixed(1) : '—'; }
+// Compare/normalize a typed Handicap Index string so "12" and "12.0" count as the same value.
+function normHI(str){
+  const t = String(str === undefined || str === null ? '' : str).trim();
+  if(t === '') return '';
+  const n = parseFloat(t);
+  return isNaN(n) ? t : n.toFixed(1);
+}
+function computedCourseHandicap(indexVal, tee){
     if(typeof indexVal !== 'number') return null;
     const r = data.teeRatings[tee];
     if(!r || typeof r.rating !== 'number' || typeof r.slope !== 'number') return null;
@@ -3163,15 +3507,20 @@
   // being paid moves the payee's total toward 0 too (toId) — see the worked
   // example in handleSetPaymentStatus_'s comment. Pending/rejected payments
   // don't touch the total at all. Rounds still in progress count too (using
-  // whatever's decided so far), so this stays live. Returns [] if there's
-  // nothing to show yet.
+  // whatever's decided so far), so this stays live. If data.moneyStatusStartDate
+  // is set, rounds before it are skipped entirely here (they still show fine in
+  // Scoreboard/review) — lets the balances start from $0/0 rounds on a chosen
+  // date instead of immediately dumping the whole season's results on everyone
+  // the moment this feature turns on. Returns [] if there's nothing to show yet.
   function computeMoneyStatus(){
     const totals = {}; // playerId -> { id, name, total, roundsPlayed, dates: [{dateKey, amount}] }
     function ensure(id, fallbackName){
       if(!totals[id]) totals[id] = { id, name: fallbackName || '(unknown player)', total: 0, roundsPlayed: 0, dates: [] };
       return totals[id];
     }
+    const startDate = data.moneyStatusStartDate || null;
     Object.keys(data.teams).sort().forEach(dateKey => {
+      if(startDate && dateKey < startDate) return;
       const standings = computeSeriesStandings(dateKey);
       const teamsInfo = data.teams[dateKey];
       if(!standings || !teamsInfo) return;
@@ -4095,6 +4444,9 @@
           <button class="ts-tab ${activeSection==='scoring'?'active':''}" data-tab="scoring">
             <span class="ts-tab-icon">🏆</span><span class="ts-tab-label">Scoring &amp; Bets</span>
           </button>
+          <button class="ts-tab ${activeSection==='comms'?'active':''}" data-tab="comms">
+            <span class="ts-tab-icon">💬</span><span class="ts-tab-label">Communications</span>${commsBadgeHtml()}
+          </button>
         </div>
 
         ${activeSection === 'admin' ? `
@@ -4112,6 +4464,7 @@
         ${activeSection === 'duty' ? `<div id="ts-duty-panel"></div>` : ''}
         ${activeSection === 'handicaps' ? `<div id="ts-handicaps-public-panel"></div>` : ''}
         ${activeSection === 'scoring' ? `<div id="ts-scoring-panel"></div>` : ''}
+        ${activeSection === 'comms' ? `<div id="ts-comms-panel"></div>` : ''}
         ${activeSection === 'schedule' ? `
           <div class="ts-section-title-row">
             <h2 class="ts-section-title">Upcoming Dates <span>next ${WEEKS_AHEAD} weeks</span></h2>
@@ -4169,6 +4522,11 @@
 
     if(activeSection === 'scoring'){
       renderScoringPanel(document.getElementById('ts-scoring-panel'));
+    }
+
+    if(activeSection === 'comms'){
+      renderCommsPanel(document.getElementById('ts-comms-panel'));
+      if(!commsLoaded) commsFetch().then(() => { const pn = document.getElementById('ts-comms-panel'); if(activeSection === 'comms' && pn) renderCommsPanel(pn); });
     }
 
     if(activeSection === 'admin'){
@@ -4645,7 +5003,7 @@
 
     const playerRows = sortedRoster().map(p => {
       const draftVal = handicapDraft.values[p.id];
-      const inputVal = draftVal !== undefined ? draftVal : (typeof p.handicapIndex === 'number' ? p.handicapIndex : '');
+      const inputVal = draftVal !== undefined ? draftVal : (typeof p.handicapIndex === 'number' ? p.handicapIndex.toFixed(1) : '');
       const previewIndex = draftVal !== undefined ? (draftVal.trim() === '' ? null : parseFloat(draftVal)) : p.handicapIndex;
       const courseHcp = (typeof previewIndex === 'number' && !isNaN(previewIndex)) ? computedCourseHandicap(previewIndex, p.defaultTee) : null;
       return `
@@ -4742,7 +5100,7 @@
       return `
         <div class="ts-roster-row">
           <span style="flex:1; min-width:170px;">${playerLabel(p)}</span>
-          <span style="width:90px; font-family:'IBM Plex Mono',monospace; font-size:12px;">${typeof p.handicapIndex === 'number' ? p.handicapIndex : '—'}</span>
+          <span style="width:90px; font-family:'IBM Plex Mono',monospace; font-size:12px;">${fmtHI(p.handicapIndex)}</span>
           <span style="width:140px; font-size:13px;">${p.defaultTee ? esc(p.defaultTee) : '—'}</span>
           <span style="width:110px; font-family:'IBM Plex Mono',monospace; font-size:12px; text-align:right;">${courseHcp !== null ? courseHcp : '—'}</span>
         </div>`;
@@ -5361,11 +5719,26 @@
         <button type="button" id="ts-payment-log-btn" class="ts-accept-scores-btn" style="margin-top:12px; max-width:180px; padding:9px 14px; font-size:13px;">Log payment</button>
       </div>`;
 
-    const moneyBalancesHtml = moneyStatus.length ? `
+    // Admin-only control for the moneyStatusStartDate cutoff above — kept
+    // outside the moneyStatus.length check below so it's still reachable
+    // (to set or clear the date) even when nothing qualifies yet, e.g. right
+    // after picking a future/today start date with no rounds played since.
+    const moneyStartDateControlHtml = isAdmin ? `
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:8px 0 12px; padding-top:10px; border-top:1px dashed var(--ivory-line);">
+        <span style="font-size:12px; color:#6b6a5e;">${data.moneyStatusStartDate ? `Only counting rounds from ${shortDateLabel(data.moneyStatusStartDate)} on.` : 'Counting every round this season.'}</span>
+        <label style="font-size:12px; color:#6b6a5e; font-weight:500;">Start date
+          <input type="date" id="ts-money-start-date" value="${data.moneyStatusStartDate || ''}" style="margin-left:6px; font-family:'Inter'; font-size:12px; padding:4px 6px; border-radius:6px; border:1px solid var(--ivory-line);">
+        </label>
+        ${data.moneyStatusStartDate ? `<button type="button" class="ts-money-details-toggle" id="ts-money-start-date-clear">Count everything instead</button>` : ''}
+      </div>
+    ` : (data.moneyStatusStartDate ? `<p style="margin:6px 0 10px; font-size:12px; color:#6b6a5e;">Only counting rounds from ${shortDateLabel(data.moneyStatusStartDate)} on.</p>` : '');
+
+    const moneyBalancesHtml = `
       <div class="ts-import-row" style="margin-top:18px;">
         <span class="ts-import-row-label">Balances</span>
         <p style="margin:6px 0 10px;">Every dated round's $ result, added up per player and netted against confirmed payments — teams are redrawn each round, so this tracks people rather than teams. Rounds still in progress count too, using whatever's been decided so far.</p>
-        <div class="ts-teams-block">
+        ${moneyStartDateControlHtml}
+        ${moneyStatus.length ? `<div class="ts-teams-block">
           ${moneyStatus.map(p => {
             const isOpen = !!expanded['money_' + p.id];
             const history = paymentsInvolving(p.id);
@@ -5386,8 +5759,8 @@
               </div>` : ''}
             </div>`;
           }).join('')}
-        </div>
-      </div>` : '<p class="ts-empty">No rounds with teams and a $ result yet.</p>';
+        </div>` : '<p class="ts-empty">No rounds counted toward Money Status yet.</p>'}
+      </div>`;
 
     const moneyStatusHtml = pendingPaymentsHtml + logPaymentHtml + moneyBalancesHtml;
 
@@ -6683,8 +7056,8 @@
           const player = data.roster.find(p => p.id === pid);
           if(!player) continue;
           const raw = handicapDraft.values[pid].trim();
-          const currentVal = typeof player.handicapIndex === 'number' ? String(player.handicapIndex) : '';
-          if(raw === currentVal) continue;
+          const currentVal = typeof player.handicapIndex === 'number' ? fmtHI(player.handicapIndex) : '';
+          if(normHI(raw) === currentVal) continue;
           anyChanged = true;
           if(raw === ''){
             delete player.handicapIndex;
@@ -6884,8 +7257,10 @@
     document.querySelectorAll('[data-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
         const tab = btn.getAttribute('data-tab');
+        if(tab !== 'comms') commsSnapshotSeen = null;
         activeSection = tab;
         render();
+        if(tab === 'comms') commsFetch().then(changed => { const pn = document.getElementById('ts-comms-panel'); if(changed && activeSection === 'comms' && pn) renderCommsPanel(pn); });
       });
     });
 
@@ -7029,6 +7404,26 @@
         const ok = await postPayment(payment);
         paymentLogBtn.disabled = false;
         if(ok) render();
+      });
+    }
+
+    // Money Status start-date cutoff — a plain global admin setting, saved
+    // the same way adminPin/guestPin are (a small, infrequent change, so the
+    // regular full saveData() is fine here; no need for its own scoped action).
+    const moneyStartDateInput = document.getElementById('ts-money-start-date');
+    if(moneyStartDateInput){
+      moneyStartDateInput.addEventListener('change', async () => {
+        data.moneyStatusStartDate = moneyStartDateInput.value || null;
+        await saveData();
+        render();
+      });
+    }
+    const moneyStartDateClearBtn = document.getElementById('ts-money-start-date-clear');
+    if(moneyStartDateClearBtn){
+      moneyStartDateClearBtn.addEventListener('click', async () => {
+        data.moneyStatusStartDate = null;
+        await saveData();
+        render();
       });
     }
 
@@ -7510,6 +7905,9 @@
     // rather than waiting for the next heartbeat tick.
     window.addEventListener('online', () => { scoringHeartbeat(); });
     setInterval(scoringHeartbeat, 25000);
+    // Communications: load once now so the unread badge is right at startup, then keep it fresh.
+    commsFetch().then(() => commsUpdateBadge());
+    setInterval(commsTick, 30000);
   })();
 })();
 </script>

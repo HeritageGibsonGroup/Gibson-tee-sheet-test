@@ -123,6 +123,11 @@
     width:100%; font-family:'Inter',sans-serif; font-size:14px; padding:9px 11px; border-radius:8px;
     border:1px solid var(--ivory-line); box-sizing:border-box; resize:vertical;
   }
+  .ts-comms-aud{
+    display:inline-block; background:#E8EFE9; color:var(--fairway); font-size:11px; font-weight:600;
+    padding:1px 8px; border-radius:999px; vertical-align:middle; margin-left:4px;
+  }
+  .ts-comms-aud-label{ display:block; font-size:12.5px; font-weight:600; color:#6b6a5e; margin-bottom:4px; }
   .ts-comms-btn{
     background:var(--fairway); color:var(--ivory); border:none; padding:9px 16px; border-radius:8px;
     font-size:13.5px; font-weight:600; cursor:pointer;
@@ -960,6 +965,62 @@
     }catch(e){ /* best-effort */ }
   }
 
+  // A drop-out can leave one tee time more than we need (9 players on 3 tee
+  // times, one drops, 8 only need 2). When that happens the backend emails the
+  // pro shop (to release it to the public), the remaining players and the
+  // booking-duty person. Only for dates where a confirmed tee-time count was
+  // actually logged; `needed` is based on everyone still signed up (standby
+  // included), so a drop-out that merely promotes someone off standby never
+  // triggers it. Best-effort, like the other notifications.
+  function maybeNotifyExtraTeeTime(dateKey, signedUpBefore, signedUpAfter, droppedPlayer){
+    try{
+      const booked = data.confirmedTeeTimes && data.confirmedTeeTimes[dateKey];
+      if(typeof booked !== 'number' || booked < 1 || signedUpAfter < 1) return;
+      const neededBefore = Math.ceil(signedUpBefore / PLAYERS_PER_TEE_TIME);
+      const neededAfter = Math.ceil(signedUpAfter / PLAYERS_PER_TEE_TIME);
+      if(!(neededAfter < neededBefore && neededAfter < booked)) return;
+      const playerIds = (data.signups[dateKey] || []).map(x => x.id);
+      const url = `${BACKEND_URL}?key=${encodeURIComponent(BACKEND_KEY)}&action=notify_extra_teetime`;
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ dateKey, neededTimes: neededAfter, bookedTimes: booked, playerIds, playerName: droppedPlayer ? droppedPlayer.name : 'A player' })
+      }).catch(() => {});
+    }catch(e){ /* best-effort */ }
+  }
+
+  // Standby players are moved up automatically (the confirmed list is simply
+  // the first N signups) and emailed when it happens. This is the in-app
+  // backstop: the next time that player opens the app, say so — useful if
+  // they have no email on file or missed it. Remembers, per device and per
+  // player, what each upcoming date looked like last time (standby/confirmed).
+  const SIGNUP_STATUS_KEY = IS_LIVE_ENV ? 'golf-league-signup-status' : 'golf-league-signup-status-TEST';
+  async function checkPromotionNotice(){
+    if(!meId) return;
+    const me = data.roster.find(p => p.id === meId);
+    if(!me) return;
+    let all = {};
+    try{ all = JSON.parse(localStorage.getItem(SIGNUP_STATUS_KEY) || '{}') || {}; }catch(e){ all = {}; }
+    const prev = all[meId] || {};
+    const todayKey = fmtDateKey(new Date());
+    const next = {};
+    const promoted = [];
+    Object.keys(data.signups || {}).sort().forEach(key => {
+      if(key < todayKey || (data.closures && data.closures[key])) return;
+      const list = data.signups[key] || [];
+      if(!list.some(x => x.id === meId)) return;
+      const status = splitConfirmedStandby(list, capacityFor(key)).confirmed.some(x => x.id === meId) ? 'confirmed' : 'standby';
+      next[key] = status;
+      if(prev[key] === 'standby' && status === 'confirmed') promoted.push(key);
+    });
+    all[meId] = next;
+    try{ localStorage.setItem(SIGNUP_STATUS_KEY, JSON.stringify(all)); }catch(e){}
+    if(promoted.length){
+      const labels = promoted.map(k => { const d = new Date(k + 'T00:00:00'); return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); });
+      await showMessage("You're in!", "A spot opened up — you're no longer on standby and are now confirmed to play on " + labels.join(' and ') + '.');
+    }
+  }
+
   // Asks the backend to build (but not send) the handicap update email —
   // exact same subject/body/PDF the real send would use (same builder
   // functions on the backend), so what's previewed here is exactly what
@@ -1337,7 +1398,7 @@
   let commsPosting = false;
   let commsSnapshotSeen = null;   // "seen" time as of when the Communications tab was opened (for NEW markers)
   let commsExpanded = new Set();
-  let commsDrafts = { newTitle: '', newBody: '', replies: {} };
+  let commsDrafts = { newTitle: '', newBody: '', audience: 'roster', replies: {} };
   let commsTickCount = 0;
 
   function commsReadSeenMap(){
@@ -1390,7 +1451,7 @@
   }
   async function commsFetch(){
     try{
-      const res = await fetchWithTimeout(`${BACKEND_URL}?key=${encodeURIComponent(BACKEND_KEY)}&action=get_comms`);
+      const res = await fetchWithTimeout(`${BACKEND_URL}?key=${encodeURIComponent(BACKEND_KEY)}&action=get_comms&viewer=${encodeURIComponent(meId || '')}`);
       const parsed = JSON.parse(await res.text());
       if(!parsed || parsed.error || !Array.isArray(parsed.messages)) return false;
       return commsAdoptMessages(parsed.messages);
@@ -1423,6 +1484,25 @@
     }
     await showMessage("Didn't go through", (lastError && lastError.message) || 'Something went wrong reaching the server. Your text is still in the box — try again in a moment.');
     return { ok: false };
+  }
+  // Who is confirmed to play today (same rule the signup list uses). Shown as a
+  // count on the "Today's players" choice; the backend works it out again
+  // itself when the topic is posted.
+  function commsTodayPlayerIds(){
+    const key = fmtDateKey(new Date());
+    if(data.closures && data.closures[key]) return [];
+    const entries = (data.signups && data.signups[key]) || [];
+    const cap = capacityFor(key);
+    return splitConfirmedStandby(entries, cap).confirmed.map(e => e.id);
+  }
+  const COMMS_AUDIENCE_TEXT = {
+    today: { icon: '⛳', short: "Today's players" },
+    roster: { icon: '👥', short: 'All roster players' },
+    everyone: { icon: '📣', short: 'Everyone incl. pro shop' }
+  };
+  function commsAudienceChip(aud){
+    if(aud === 'roster' || !COMMS_AUDIENCE_TEXT[aud]) return '';
+    return `<span class="ts-comms-aud">${COMMS_AUDIENCE_TEXT[aud].icon} ${esc(COMMS_AUDIENCE_TEXT[aud].short)}</span>`;
   }
   function commsNewId(){
     return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -1470,6 +1550,8 @@
     const threads = commsThreads();
     const seenSnap = commsSnapshotSeen;
     const canEmail = !!me.email;
+    const todayCount = commsTodayPlayerIds().length;
+    if(commsDrafts.audience === 'today' && !todayCount) commsDrafts.audience = 'roster';
     const emailOn = me.commsEmail !== false;
     const threadHtml = threads.map(t => {
       const open = commsExpanded.has(t.root.id);
@@ -1479,7 +1561,7 @@
       return `
         <div class="ts-card ts-comms-thread" data-comms-thread="${esc(t.root.id)}">
           <button type="button" class="ts-comms-head" data-comms-toggle="${esc(t.root.id)}" aria-expanded="${open}">
-            <span class="ts-comms-title">${esc(t.root.title)} ${unreadInThread ? '<span class="ts-comms-new">NEW</span>' : ''}</span>
+            <span class="ts-comms-title">${esc(t.root.title)} ${unreadInThread ? '<span class="ts-comms-new">NEW</span>' : ''} ${commsAudienceChip(t.root.audience)}</span>
             <span class="ts-comms-sub">${esc(t.root.authorName)} · ${t.replies.length} repl${t.replies.length === 1 ? 'y' : 'ies'} · last activity ${esc(commsTime(t.lastTs))}</span>
             ${open ? '' : `<span class="ts-comms-preview">${esc(t.last.authorName)}: ${esc(preview)}${t.last.body.length > 90 ? '…' : ''}</span>`}
           </button>
@@ -1497,7 +1579,13 @@
     el.innerHTML = `
       <div class="ts-card" style="padding:16px 18px;">
         <h3 style="margin:0 0 4px; font-family:'Fraunces',serif; color:var(--fairway);">Communications</h3>
-        <p style="margin:0 0 12px; font-size:13px; color:#6b6a5e;">Start a topic for the whole league; anyone can reply. New topics are also emailed to everyone.</p>
+        <p style="margin:0 0 12px; font-size:13px; color:#6b6a5e;">Start a topic and choose who it goes to; the people it goes to can reply. New topics are also emailed to that group.</p>
+        <label class="ts-comms-aud-label" for="ts-comms-audience">Send to</label>
+        <select id="ts-comms-audience" class="ts-comms-input" style="margin-bottom:8px;">
+          <option value="today" ${todayCount ? '' : 'disabled'}>⛳ Today's players (${todayCount ? todayCount + ' confirmed' : 'nobody confirmed today'})</option>
+          <option value="roster">👥 All roster players</option>
+          <option value="everyone">📣 Everyone, including the pro shop</option>
+        </select>
         <input type="text" id="ts-comms-new-title" maxlength="120" placeholder="Topic title" class="ts-comms-input">
         <textarea id="ts-comms-new-body" rows="3" maxlength="2000" placeholder="What would you like to say?" class="ts-comms-input" style="margin-top:8px;"></textarea>
         <div style="margin-top:8px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
@@ -1513,6 +1601,9 @@
     const titleEl = document.getElementById('ts-comms-new-title');
     const bodyEl = document.getElementById('ts-comms-new-body');
     titleEl.value = commsDrafts.newTitle;
+    const audEl = document.getElementById('ts-comms-audience');
+    audEl.value = commsDrafts.audience;
+    audEl.addEventListener('change', () => { commsDrafts.audience = audEl.value; });
     bodyEl.value = commsDrafts.newBody;
     titleEl.addEventListener('input', () => { commsDrafts.newTitle = titleEl.value; });
     bodyEl.addEventListener('input', () => { commsDrafts.newBody = bodyEl.value; });
@@ -1558,10 +1649,11 @@
     const btn = document.getElementById('ts-comms-post');
     if(btn) btn.disabled = true;
     const id = commsNewId();
-    const r = await commsRequest('post_comms', { message: { id, authorId: meId, title, body } });
+    const r = await commsRequest('post_comms', { message: { id, authorId: meId, title, body, audience: commsDrafts.audience } });
     commsPosting = false;
     if(r.ok){
       commsDrafts.newTitle = ''; commsDrafts.newBody = '';
+      commsDrafts.audience = 'roster';
       commsExpanded.add(id);
     }
     renderCommsPanel(document.getElementById('ts-comms-panel') || el);
@@ -7741,6 +7833,7 @@ function computedCourseHandicap(indexVal, tee){
           const afterConfirmedIds = splitConfirmedStandby(list, capacity).confirmed.map(x => x.id);
           const newlyPromoted = afterConfirmedIds.filter(id => !beforeConfirmedIds.includes(id));
           if(newlyPromoted.length) notifyPromoted(key, newlyPromoted);
+          maybeNotifyExtraTeeTime(key, list.length + 1, list.length, droppedPlayer);
           // A drop-out on the day of play itself is the one that actually
           // strands a foursome — tee times are already booked, so unlike an
           // advance drop-out (which just quietly opens the spot to standby),
@@ -7794,6 +7887,7 @@ function computedCourseHandicap(indexVal, tee){
         const beforeConfirmedIds = splitConfirmedStandby(data.signups[key] || [], capacity).confirmed.map(x => x.id);
         const removedPlayer = data.roster.find(p => p.id === pid);
         const wasConfirmed = beforeConfirmedIds.includes(pid);
+        const countBeforeRemove = (data.signups[key] || []).length;
         data.signups[key] = (data.signups[key] || []).filter(x => x.id !== pid);
         // Same team/"Not in Bet" cleanup as the self-service drop-out — otherwise
         // an admin-removed player lingers as a ghost in Swap players too.
@@ -7801,6 +7895,7 @@ function computedCourseHandicap(indexVal, tee){
         const afterConfirmedIds = splitConfirmedStandby(data.signups[key], capacity).confirmed.map(x => x.id);
         const newlyPromoted = afterConfirmedIds.filter(id => !beforeConfirmedIds.includes(id));
         if(newlyPromoted.length) notifyPromoted(key, newlyPromoted);
+        maybeNotifyExtraTeeTime(key, countBeforeRemove, data.signups[key].length, removedPlayer);
         // Same day-of-play group alert as the self-service drop-out above —
         // this admin-driven removal is the same "someone's out and the group
         // needs to know now" situation (e.g. a player calls in to the admin
@@ -7900,6 +7995,7 @@ function computedCourseHandicap(indexVal, tee){
     await reverifyIfNeeded();
     await autoIdentifyIfNeeded();
     render();
+    checkPromotionNotice();
 
     // Retry failed score saves as soon as the device thinks it's back online,
     // rather than waiting for the next heartbeat tick.

@@ -1404,6 +1404,10 @@
   let commsExpanded = new Set();
   let commsDrafts = { newTitle: '', newBody: '', audience: 'roster', replies: {} };
   let commsTickCount = 0;
+  // Master switch for Messages, controlled by an admin (Admin > Reminders). null =
+  // not heard from the backend yet (the tab stays hidden until it says on). An
+  // older backend that does not report the switch is treated as on.
+  let commsEnabled = null;
 
   function commsReadSeenMap(){
     try{ return JSON.parse(localStorage.getItem(COMMS_SEEN_KEY) || '{}') || {}; }catch(e){ return {}; }
@@ -1458,7 +1462,15 @@
       const res = await fetchWithTimeout(`${BACKEND_URL}?key=${encodeURIComponent(BACKEND_KEY)}&action=get_comms&viewer=${encodeURIComponent(meId || '')}`);
       const parsed = JSON.parse(await res.text());
       if(!parsed || parsed.error || !Array.isArray(parsed.messages)) return false;
-      return commsAdoptMessages(parsed.messages);
+      const wasEnabled = commsEnabled;
+      commsEnabled = parsed.enabled !== false;
+      if(!commsEnabled){
+        commsMessages = [];
+        commsLoaded = true;
+        return wasEnabled !== commsEnabled;
+      }
+      const changed = commsAdoptMessages(parsed.messages);
+      return changed || wasEnabled !== commsEnabled;
     }catch(e){ return false; }
   }
   async function commsRequest(action, payload){
@@ -1704,8 +1716,17 @@
     commsTickCount++;
     const viewing = activeSection === 'comms';
     if(!viewing && commsTickCount % 3 !== 0) return;
+    const wasEnabled = commsEnabled;
     const changed = await commsFetch();
     if(!changed) return;
+    if(wasEnabled !== commsEnabled){
+      // An admin flipped the Messages switch: show or hide the tab. Wait for a
+      // moment when nobody is typing so a form is never wiped mid-sentence.
+      const ae = document.activeElement;
+      if(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')){ commsEnabled = wasEnabled; return; }
+      render();
+      return;
+    }
     if(viewing){
       const panel = document.getElementById('ts-comms-panel');
       const a = document.activeElement;
@@ -4454,6 +4475,7 @@ function computedCourseHandicap(indexVal, tee){
   }
 
   function render(){
+    if(activeSection === 'comms' && commsEnabled !== true) activeSection = 'schedule';
     if(activeSection === 'admin' && !isAdmin) activeSection = 'schedule';
     if(data.roster.length === 0 && activeSection !== 'roster'){
       root.innerHTML = `
@@ -4559,9 +4581,9 @@ function computedCourseHandicap(indexVal, tee){
           <button class="ts-tab ${activeSection==='scoring'?'active':''}" data-tab="scoring">
             <span class="ts-tab-icon">🏆</span><span class="ts-tab-label">Scoring &amp; Bets</span>
           </button>
-          <button class="ts-tab ${activeSection==='comms'?'active':''}" data-tab="comms">
+          ${commsEnabled === true ? `<button class="ts-tab ${activeSection==='comms'?'active':''}" data-tab="comms">
             <span class="ts-tab-icon">💬</span><span class="ts-tab-label">Messages</span>${commsBadgeHtml()}
-          </button>
+          </button>` : ''}
         </div>
 
         ${activeSection === 'admin' ? `
@@ -5044,6 +5066,11 @@ function computedCourseHandicap(indexVal, tee){
     el.innerHTML = `
       <div class="ts-roster-panel">
         <div class="ts-import-row ts-ci-section" style="margin-top:0; padding-top:0; border-top:none;">
+          <span class="ts-import-row-label">Messages</span>
+          <p style="margin:0 0 10px;">Messages lets players post topics and reply, and emails new topics to the group. It is currently <strong>${commsEnabled === true ? 'ON' : (commsEnabled === false ? 'OFF' : 'checking…')}</strong>. When it is off the Messages tab is hidden for everyone and nothing is emailed; existing messages are kept and come back when you turn it on. Players' devices pick up a change within a minute or two.</p>
+          <button id="ts-messages-toggle" ${commsEnabled === null ? 'disabled' : ''}>${commsEnabled === true ? 'Turn Messages off' : 'Turn Messages on'}</button>
+        </div>
+        <div class="ts-import-row ts-ci-section">
           <span class="ts-import-row-label">Pro shop</span>
           <p style="margin:0 0 10px;">Pro shop staff. They get the nightly "playing tomorrow" email, and the "please cancel our last tee time" email when a drop-out leaves a spare tee time. Add, change or remove addresses here (to change one, remove it and add the new one).</p>
           ${proShopRowsHtml || '<p class="ts-empty">No pro shop addresses yet. The cancel-a-tee-time email will not be sent until you add one.</p>'}
@@ -6763,6 +6790,32 @@ function computedCourseHandicap(indexVal, tee){
         render();
       };
     }
+    const messagesToggleBtn = document.getElementById('ts-messages-toggle');
+    if(messagesToggleBtn){
+      messagesToggleBtn.onclick = async () => {
+        if(!isAdmin || commsEnabled === null) return;
+        const turnOn = commsEnabled !== true;
+        if(!turnOn){
+          const ok = await askConfirm('Turn Messages off?', 'The Messages tab will disappear for everyone and new topics will no longer be emailed. Existing messages are kept and return when you turn it back on.', 'Turn off', 'Cancel');
+          if(!ok) return;
+        }
+        messagesToggleBtn.disabled = true;
+        try{
+          const res = await fetchWithTimeout(`${BACKEND_URL}?key=${encodeURIComponent(BACKEND_KEY)}&action=set_messages_enabled`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ enabled: turnOn, requesterId: meId })
+          });
+          const parsed = JSON.parse(await res.text());
+          if(parsed && parsed.error) throw new Error(parsed.error);
+          commsEnabled = !!(parsed && parsed.enabled);
+          if(commsEnabled) await commsFetch();
+        }catch(e){
+          await showMessage("Didn't go through", (e && e.message) || 'Could not reach the server. Try again in a moment.');
+        }
+        render();
+      };
+    }
     const addProShopBtn = document.getElementById('ts-add-proshop-email');
     if(addProShopBtn){
       addProShopBtn.onclick = async () => {
@@ -8073,7 +8126,7 @@ function computedCourseHandicap(indexVal, tee){
     window.addEventListener('online', () => { scoringHeartbeat(); });
     setInterval(scoringHeartbeat, 25000);
     // Communications: load once now so the unread badge is right at startup, then keep it fresh.
-    commsFetch().then(() => commsUpdateBadge());
+    commsFetch().then(() => { if(commsEnabled === true) render(); commsUpdateBadge(); });
     setInterval(commsTick, 30000);
   })();
 })();

@@ -98,7 +98,10 @@
   .ts-login-card label{ display:block; font-size:12.5px; color:#6b6a5e; font-weight:600; margin:10px 0 6px; }
   .ts-login-card input{ width:100%; font-family:'Inter',sans-serif; font-size:16px; padding:11px 12px; border-radius:8px; border:1px solid var(--ivory-line); background:#fff; color:var(--ink); }
   .ts-login-btn{ width:100%; margin-top:14px; font-family:'Inter',sans-serif; font-size:15px; font-weight:600; padding:12px; border:none; border-radius:8px; background:var(--fairway); color:var(--ivory); cursor:pointer; }
-  .ts-login-alt{ margin-top:14px; text-align:center; font-size:13px; color:#6b6a5e; display:flex; justify-content:center; gap:10px; align-items:center; }
+  .ts-login-alt{ margin-top:14px; display:flex; justify-content:center; gap:10px; align-items:center; }
+  .ts-login-alt > span{ display:none; }
+  .ts-login-alt .ts-pin-link{ flex:1; font-family:'Inter',sans-serif; font-size:14px; font-weight:600; text-decoration:none; color:var(--fairway); background:#fff; border:1.5px solid var(--fairway); border-radius:8px; padding:11px 10px; cursor:pointer; }
+  .ts-login-alt .ts-pin-link:hover{ background:var(--ivory); }
   .ts-login-note{ margin:0 0 4px; font-size:13.5px; color:var(--ink); line-height:1.45; }
   .ts-login-err{ min-height:18px; margin:12px 0 0; color:var(--rust); font-size:13px; line-height:1.4; }
   .ts-pin-link{
@@ -2632,7 +2635,7 @@
             <button class="ts-login-btn" id="ts-login-next">Continue</button>
             <div class="ts-login-alt">
               <button class="ts-pin-link" id="ts-login-guest">I'm a guest</button>
-              <span>·</span>
+              
               <button class="ts-pin-link" id="ts-login-admin">League admin</button>
             </div>`;
         } else if(step === 'pin'){

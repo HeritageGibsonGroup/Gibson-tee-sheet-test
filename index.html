@@ -848,7 +848,7 @@
   const GOLF_TOMORROW_EXTRA_CC = ['stevekirchhoff52@gmail.com', 'rtleene@aol.com'];
   const BOOKING_WINDOW_DAYS = 14; // club allows booking 2 weeks ahead
   const WEEKS_AHEAD = 52;
-  const VERSION_DATE = 'October 4, 2026'; // update this each time a change is promoted to live
+  const VERSION_DATE = 'October 5, 2026'; // update this each time a change is promoted to live
   const PLAY_DOWS = [1,3,5]; // Mon, Wed, Fri
   const HOLES_CYCLE = ['18','F9','B9'];
   const HOLES_LABEL = { '18': '18 holes', 'F9': 'Front 9', 'B9': 'Back 9' };
@@ -1553,7 +1553,7 @@
     if(!el) return;
     const me = meId ? data.roster.find(p => p.id === meId) : null;
     if(!me){
-      el.innerHTML = `<div class="ts-card" style="padding:18px;"><h3 style="margin:0 0 8px; font-family:'Fraunces',serif; color:var(--fairway);">Communications</h3>
+      el.innerHTML = `<div class="ts-card" style="padding:18px;"><h3 style="margin:0 0 8px; font-family:'Fraunces',serif; color:var(--fairway);">Messages</h3>
         <p style="margin:0; font-size:14px;">Pick your name in the <strong>I'm —</strong> menu at the top of the page to read and post messages.</p></div>`;
       return;
     }
@@ -1590,13 +1590,12 @@
     }).join('');
     el.innerHTML = `
       <div class="ts-card" style="padding:16px 18px;">
-        <h3 style="margin:0 0 4px; font-family:'Fraunces',serif; color:var(--fairway);">Communications</h3>
+        <h3 style="margin:0 0 4px; font-family:'Fraunces',serif; color:var(--fairway);">Messages</h3>
         <p style="margin:0 0 12px; font-size:13px; color:#6b6a5e;">Start a topic and choose who it goes to; the people it goes to can reply. New topics are also emailed to that group.</p>
         <label class="ts-comms-aud-label" for="ts-comms-audience">Send to</label>
         <select id="ts-comms-audience" class="ts-comms-input" style="margin-bottom:8px;">
           <option value="next" ${nextCount ? '' : 'disabled'}>⛳ Next round's players${nextRound.key ? ' — ' + esc(nextRound.label) : ''} (${nextCount ? nextCount + ' confirmed' : 'nobody confirmed yet'})</option>
-          <option value="roster">👥 All roster players</option>
-          <option value="everyone">📣 Everyone, including the pro shop</option>
+          <option value="roster">👥 All ${data.roster.filter(p => !p.isGuest).length} roster players</option>
         </select>
         <input type="text" id="ts-comms-new-title" maxlength="120" placeholder="Topic title" class="ts-comms-input">
         <textarea id="ts-comms-new-body" rows="3" maxlength="2000" placeholder="What would you like to say?" class="ts-comms-input" style="margin-top:8px;"></textarea>
@@ -4111,7 +4110,7 @@ function computedCourseHandicap(indexVal, tee){
       const targetKey = fmtDateKey(target);
       let dutyText;
       if(data.closures[targetKey]){
-        dutyText = `Course closed ${FULL_MONTHS[target.getMonth()]} ${target.getDate()} — no tee times needed`;
+        dutyText = `Course closed ${MON_NAMES[target.getMonth()]} ${target.getDate()} — no one has booking duty on ${MON_NAMES[d.getMonth()]} ${d.getDate()}`;
       } else {
         const targetDuty = dutyForKey(targetKey);
         const targetCount = (data.signups[targetKey] || []).length;
@@ -4561,7 +4560,7 @@ function computedCourseHandicap(indexVal, tee){
             <span class="ts-tab-icon">🏆</span><span class="ts-tab-label">Scoring &amp; Bets</span>
           </button>
           <button class="ts-tab ${activeSection==='comms'?'active':''}" data-tab="comms">
-            <span class="ts-tab-icon">💬</span><span class="ts-tab-label">Communications</span>${commsBadgeHtml()}
+            <span class="ts-tab-icon">💬</span><span class="ts-tab-label">Messages</span>${commsBadgeHtml()}
           </button>
         </div>
 
@@ -4725,7 +4724,7 @@ function computedCourseHandicap(indexVal, tee){
       const targetClosed = !!data.closures[targetKey];
 
       const dutyControl = targetClosed
-        ? `<span class="ts-duty-static">Course closed ${MON_NAMES[targetDate.getMonth()]} ${targetDate.getDate()} — no tee times needed</span>`
+        ? `<span class="ts-duty-static">Course closed ${MON_NAMES[targetDate.getMonth()]} ${targetDate.getDate()} — no one has booking duty ${key === fmtDateKey(new Date()) ? 'today' : 'on ' + MON_NAMES[d.getMonth()] + ' ' + d.getDate()}</span>`
         : `<span class="ts-duty-static">${targetDuty ? playerLabel(targetDuty) + ' has booking duty' : 'No one has booking duty yet'}</span>`;
 
       const generatedTeams = data.teams[key];
@@ -5046,7 +5045,7 @@ function computedCourseHandicap(indexVal, tee){
       <div class="ts-roster-panel">
         <div class="ts-import-row ts-ci-section" style="margin-top:0; padding-top:0; border-top:none;">
           <span class="ts-import-row-label">Pro shop</span>
-          <p style="margin:0 0 10px;">Pro shop staff. They get the nightly "playing tomorrow" email, the "please cancel our last tee time" email when a drop-out leaves a spare tee time, and Communications topics sent to "Everyone". Add, change or remove addresses here (to change one, remove it and add the new one).</p>
+          <p style="margin:0 0 10px;">Pro shop staff. They get the nightly "playing tomorrow" email, and the "please cancel our last tee time" email when a drop-out leaves a spare tee time. Add, change or remove addresses here (to change one, remove it and add the new one).</p>
           ${proShopRowsHtml || '<p class="ts-empty">No pro shop addresses yet. The cancel-a-tee-time email will not be sent until you add one.</p>'}
           <div class="ts-add-row" style="margin-top:10px;">
             <input type="email" placeholder="name@example.com" id="ts-new-proshop-email">
@@ -5055,7 +5054,7 @@ function computedCourseHandicap(indexVal, tee){
         </div>
         <div class="ts-import-row ts-ci-section">
           <span class="ts-import-row-label">Extra recipients</span>
-          <p style="margin:0 0 10px;">Everyone on the roster with an email on file already gets the automatic "playing tomorrow" email every night before a play day. Add anyone else who should get it too (not pro shop staff, who are listed above). They also get Communications topics sent to "Everyone".</p>
+          <p style="margin:0 0 10px;">Everyone on the roster with an email on file already gets the automatic "playing tomorrow" email every night before a play day. Add anyone else who should get it too (not pro shop staff, who are listed above).</p>
           ${recipientRowsHtml || '<p class="ts-empty">No extra recipients yet.</p>'}
           <div class="ts-add-row" style="margin-top:10px;">
             <input type="email" placeholder="name@example.com" id="ts-new-reminder-email">

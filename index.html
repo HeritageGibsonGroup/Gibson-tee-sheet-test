@@ -688,12 +688,13 @@
   .ts-swap-grid{ display:grid; grid-template-columns:minmax(120px, 200px) minmax(0, 1fr); column-gap:16px; align-items:center; }
   .ts-swap-grid > div{ padding:8px 0; border-bottom:1px solid var(--ivory-line); }
   .ts-swap-head{ font-size:11px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:#6b6a5e; }
+  .ts-swap-head-ask{ text-transform:none; letter-spacing:0; font-size:13px; color:var(--fairway); }
   .ts-swap-date b{ display:block; font-size:15px; }
   .ts-swap-date span{ font-size:12px; color:#6b6a5e; }
   .ts-swap-grid select{ width:100%; max-width:420px; font-family:'Inter'; font-size:14px; padding:8px 10px; border-radius:7px; border:1px solid var(--ivory-line); }
   .ts-swap-actions{ display:flex; align-items:center; gap:14px; margin-top:12px; }
   .ts-swap-send{ background:var(--fairway); color:#fff; border:none; border-radius:7px; padding:10px 18px; font-family:'Inter'; font-size:14px; font-weight:600; cursor:pointer; }
-  @media (max-width:560px){ .ts-swap-grid{ grid-template-columns:minmax(0,1fr); } .ts-swap-grid > div:nth-child(2){ display:none; } .ts-swap-date{ border-bottom:none !important; padding-bottom:2px !important; } }
+  @media (max-width:560px){ .ts-swap-grid{ grid-template-columns:minmax(0,1fr); } .ts-swap-grid > div:nth-child(1){ padding-bottom:0; border-bottom:none; } .ts-swap-date{ border-bottom:none !important; padding-bottom:2px !important; } }
   .ts-link-btn{ background:none; border:none; padding:0; text-decoration:underline; color:var(--fairway); cursor:pointer; font-family:'Inter'; font-size:13px; }
   .ts-duty-sort-btn{
     font-family:'Inter',sans-serif; font-size:12px; font-weight:500; color:#6b6a5e;
@@ -826,6 +827,8 @@
     width:100%; font-family:'Inter'; font-size:14px; padding:9px 11px; border-radius:7px;
     border:1px solid var(--ivory-line); margin-bottom:14px; background:#fff; color:var(--ink);
   }
+  .ts-modal-box{ font-family:'Inter',sans-serif; }
+  .ts-modal-label{ display:block; font-size:12px; font-weight:600; color:#6b6a5e; margin:0 0 4px; }
   .ts-modal-actions{ display:flex; gap:8px; justify-content:flex-end; }
   .ts-modal-actions button{
     font-family:'Inter'; font-size:13px; font-weight:600; padding:8px 16px; border-radius:7px; cursor:pointer; border:none;
@@ -960,7 +963,7 @@
   // Shown in the top-right corner next to the script's own SCRIPT_VERSION, so
   // it's easy to see which page and script versions a site is running.
   // Bump it with every change to this file.
-  const APP_VERSION = '2026.10.24.4';
+  const APP_VERSION = '2026.10.24.5';
   const PLAY_DOWS = [1,3,5]; // Mon, Wed, Fri
   const HOLES_CYCLE = ['18','F9','B9'];
   const HOLES_LABEL = { '18': '18 holes', 'F9': 'Front 9', 'B9': 'Back 9' };
@@ -2573,6 +2576,50 @@
         if(e.key === 'Escape') cleanup(null);
       });
     });
+  }
+
+  // "My info" (top right): a player updates their own email and default tee.
+  // Their name stays with the admin, since it's what everything else matches on.
+  function openMyInfo(){
+    const me = data.roster.find(p => p.id === meId);
+    if(!me) return;
+    const modalRoot = document.getElementById('ts-modal-root');
+    modalRoot.innerHTML = `
+      <div class="ts-modal-overlay" id="ts-modal-overlay">
+        <div class="ts-modal-box">
+          <h4>My info</h4>
+          <p><b>${esc(me.name)}</b><br><span style="font-size:13px; color:#6b6a5e;">To change your name, ask the league admin.</span></p>
+          <label class="ts-modal-label" for="ts-myinfo-email">Email</label>
+          <input type="email" id="ts-myinfo-email" value="${esc(me.email || '')}" placeholder="you@example.com">
+          ${data.teeOptions.length ? `
+          <label class="ts-modal-label" for="ts-myinfo-tee">Default tee</label>
+          <select id="ts-myinfo-tee">
+            <option value="">Not set</option>
+            ${data.teeOptions.map(tee => `<option value="${esc(tee)}" ${me.defaultTee===tee?'selected':''}>${esc(tee)}</option>`).join('')}
+          </select>` : ''}
+          <div class="ts-modal-actions">
+            <button class="ts-modal-cancel" id="ts-modal-cancel">Cancel</button>
+            <button class="ts-modal-ok" id="ts-modal-ok">Save</button>
+          </div>
+        </div>
+      </div>`;
+    const close = () => { modalRoot.innerHTML = ''; };
+    document.getElementById('ts-modal-cancel').onclick = close;
+    document.getElementById('ts-modal-overlay').addEventListener('click', (e) => { if(e.target.id === 'ts-modal-overlay') close(); });
+    document.getElementById('ts-modal-ok').onclick = async () => {
+      const email = document.getElementById('ts-myinfo-email').value.trim();
+      const teeSel = document.getElementById('ts-myinfo-tee');
+      if(email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+        close();
+        await showMessage('Check your email address', 'That doesn\'t look like an email address. Try again from My info.');
+        return;
+      }
+      close();
+      if(email){ me.email = email; } else { delete me.email; }
+      if(teeSel){ if(teeSel.value){ me.defaultTee = teeSel.value; } else { delete me.defaultTee; } }
+      await saveData();
+      render();
+    };
   }
 
   function showMessage(title, message){
@@ -4950,6 +4997,7 @@ function computedCourseHandicap(indexVal, tee){
         ${loginRequired ? `
         <div class="ts-topbar">
           <span>Signed in as <strong>${me ? esc(me.name) : (isAdmin ? 'League admin' : 'Guest')}</strong></span>
+          ${me ? `<button class="ts-topbar-link" id="ts-my-info">My info</button>` : ''}
           ${me ? `<button class="ts-topbar-link" id="ts-set-pin">${meHasPin ? 'Change PIN' : 'Set PIN'}</button>` : ''}
           <button class="ts-topbar-link" id="ts-sign-out">Sign out</button>
           <button class="ts-admin-pill ${isAdmin?'on':''}" id="ts-admin-pill" title="${isAdmin ? 'Admin unlocked — tap to lock' : 'Admin'}">${isAdmin ? '🔓 Admin' : '🔒'}</button>
@@ -7159,12 +7207,8 @@ function computedCourseHandicap(indexVal, tee){
     const dayLabel = (dt) => `${DOW_NAMES[dt.getDay()]}, ${MON_NAMES[dt.getMonth()]} ${dt.getDate()}`;
     const swapSectionHtml = myDutyRows.length ? `
       <div class="ts-swap-section">
-        <h4>Swap your booking duty dates</h4>
-        <p class="ts-note" style="border-top:none; padding-top:0; margin-top:0;">
-          Pick who you'd like to trade with for any or all of your dates; leave the others on "Keep this date". Each person gets an email and must accept before anything changes.
-        </p>
         <div class="ts-swap-grid">
-          <div class="ts-swap-head">My dates</div><div class="ts-swap-head">Request swap with...</div>
+          <div class="ts-swap-head">My dates</div><div class="ts-swap-head ts-swap-head-ask">Click below to ask someone to swap dates with you</div>
           ${(swapShowAllDates ? myDutyRows : myDutyRows.slice(0, 3)).map(r => {
             const outgoing = pendingOutgoingFrom(r.playKey);
             let control;
@@ -7207,13 +7251,9 @@ function computedCourseHandicap(indexVal, tee){
     el.innerHTML = `
       <div class="ts-roster-panel">
         <div class="ts-section-title-row" style="margin:0 0 8px;">
-          <h4 style="margin:0;">Booking Duty — who's heading to the club</h4>
+          <h4 style="margin:0;">My Booking Duty Snapshot</h4>
           <button class="ts-print-btn" id="ts-print-duty">🖨️ Print</button>
         </div>
-        <p class="ts-note" style="border-top:none; padding-top:0; margin-top:0;">
-          ${isAdmin ? 'Pick who\'s going to the pro shop on each date below.' : 'Who\'s going to the pro shop on each date, and how many tee times to request.'}
-          They'll be requesting tee times for the round two weeks after that date.
-        </p>
         ${incomingHtml}
         ${swapSectionHtml}
         <div class="ts-duty-controls">
@@ -8341,6 +8381,9 @@ function computedCourseHandicap(indexVal, tee){
         render();
       };
     }
+
+    const myInfoBtn = document.getElementById('ts-my-info');
+    if(myInfoBtn) myInfoBtn.onclick = () => openMyInfo();
 
     const setPinBtn = document.getElementById('ts-set-pin');
     if(setPinBtn){

@@ -722,6 +722,17 @@
   .ts-qplan-away-edit input{ font-family:'Inter'; font-size:13px; padding:4px 6px; border-radius:6px; border:1px solid var(--ivory-line); }
   .ts-qplan-inline{ display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; }
   .ts-qplan-inline-label{ display:flex; align-items:center; gap:8px; font-size:14px; flex-wrap:wrap; }
+  .ts-qsum-wrap{ overflow-x:auto; margin:4px 0 10px; }
+  .ts-qsum{ width:100%; border-collapse:collapse; font-size:13px; background:#fff; border:1px solid var(--ivory-line); border-radius:8px; }
+  .ts-qsum th{ text-align:left; font-size:12px; font-weight:600; color:#6b6a5e; padding:7px 10px; border-bottom:1px solid var(--ivory-line); vertical-align:bottom; }
+  .ts-qsum th span{ font-weight:400; font-size:11px; }
+  .ts-qsum td{ padding:6px 10px; border-bottom:1px solid var(--ivory-line); }
+  .ts-qsum .num{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .ts-qsum td b{ color:var(--fairway); }
+  .ts-qsum tfoot td{ font-weight:600; border-bottom:none; }
+  .ts-qsum-details{ margin:6px 0 10px; }
+  @media (max-width:560px){ .ts-qsum th:nth-child(3), .ts-qsum td:nth-child(3), .ts-qsum th:nth-child(5), .ts-qsum td:nth-child(5){ display:none; } .ts-qsum th, .ts-qsum td{ padding:6px 8px; } }
+  .ts-qsum-details summary{ cursor:pointer; font-size:14px; font-weight:600; color:var(--fairway); padding:4px 0; }
   .ts-qplan-tag.warn{ color:var(--rust); background:#FBEDEA; }
   @media (max-width:760px){ .ts-qplan-prow{ grid-template-columns:minmax(0,1fr); gap:4px; } .ts-qplan-pstats{ padding-left:24px; } .ts-qplan-pprefs, .ts-qplan-paway{ padding-left:24px; } }
   .ts-qplan-links{ display:flex; gap:14px; margin-bottom:6px; }
@@ -7200,11 +7211,11 @@ function computedCourseHandicap(indexVal, tee){
   }
   function defaultQuarterKey(){ return quarterOptions()[1]; } // next quarter = "in advance"
   // Booking days in the quarter that haven't passed yet, each with its round.
-  function quarterDutyDays(qKey){
+  function quarterDutyDays(qKey, includePast){
     const today = new Date(); today.setHours(0,0,0,0);
     const { start, end } = quarterRange(qKey);
     const days = [];
-    let cursor = new Date(Math.max(start, today));
+    let cursor = includePast ? new Date(start) : new Date(Math.max(start, today));
     while(cursor <= end){
       if(PLAY_DOWS.includes(cursor.getDay())){
         const bookDate = new Date(cursor);
@@ -7370,6 +7381,68 @@ function computedCourseHandicap(indexVal, tee){
       ' Players can see their dates on the Booking Duty tab, and swaps work as usual.');
   }
 
+  // ---- Rounds and duty summary (admin) ----
+  // Per player: rounds played in the window and booking-duty days in the
+  // quarter (every booking day in it, past ones too). Used on its own box on
+  // the Booking Duty tab (saved duties) and inside the planner (the preview).
+  let dutySummary = null; // null = closed, else { qKey, windowOffset }
+  function summaryQuarterOptions(){
+    const opts = quarterOptions();
+    const { start } = quarterRange(opts[0]);
+    return [quarterKeyFor(new Date(start.getFullYear(), start.getMonth() - 3, 1)), ...opts];
+  }
+  function dutySummaryTableHtml(qKey, windowOffset, previewPicks, includeIds){
+    const win = roundsWindow(qKey, windowOffset);
+    const played = roundsPlayedIn(win);
+    const duties = {};
+    quarterDutyDays(qKey, true).forEach(d => {
+      if(d.closed) return;
+      const id = previewPicks && previewPicks[d.playKey] !== undefined ? previewPicks[d.playKey] : data.duty[d.playKey];
+      if(id) duties[id] = (duties[id] || 0) + 1;
+    });
+    const players = sortedRoster().filter(p => (played[p.id] || 0) > 0 || (duties[p.id] || 0) > 0 || (includeIds && includeIds.includes(p.id)));
+    players.sort((a, b) => ((played[b.id]||0) - (played[a.id]||0)) || ((duties[b.id]||0) - (duties[a.id]||0)));
+    const totalR = players.reduce((s, p) => s + (played[p.id] || 0), 0);
+    const totalD = players.reduce((s, p) => s + (duties[p.id] || 0), 0);
+    const pct = (n, t) => t ? Math.round(100 * n / t) + '%' : '–';
+    const { label } = quarterRange(qKey);
+    if(!players.length) return `<p class="ts-qplan-sub">No rounds played ${win.label} and no booking duty in ${label} yet.</p>`;
+    return `<div class="ts-qsum-wrap"><table class="ts-qsum">
+        <thead><tr><th>Player</th><th class="num">Rounds played<br><span>${win.label}</span></th><th class="num">Share of rounds</th><th class="num">Duty days<br><span>${label}</span></th><th class="num">Share of duty</th></tr></thead>
+        <tbody>${players.map(p => `<tr><td>${playerLabel(p)}</td><td class="num">${played[p.id] || 0}</td><td class="num">${pct(played[p.id] || 0, totalR)}</td><td class="num"><b>${duties[p.id] || 0}</b></td><td class="num">${pct(duties[p.id] || 0, totalD)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><td>Total</td><td class="num">${totalR}</td><td></td><td class="num">${totalD}</td><td></td></tr></tfoot>
+      </table></div>`;
+  }
+  function dutySummaryHtml(){
+    if(!isAdmin) return '';
+    if(!dutySummary){
+      return `<div class="ts-qplan">
+          <div class="ts-qplan-head">
+            <h4>Rounds and duty summary</h4>
+            <button class="ts-duty-sort-btn" id="ts-qsum-open">Show summary</button>
+          </div>
+          <p class="ts-qplan-sub">See how many rounds each player played and how many booking duty days they have in a quarter.</p>
+        </div>`;
+    }
+    const today = new Date();
+    return `<div class="ts-qplan">
+        <div class="ts-qplan-head">
+          <h4>Rounds and duty summary</h4>
+          <button class="ts-link-btn" id="ts-qsum-close">Hide summary</button>
+        </div>
+        <div class="ts-qplan-inline" style="margin:10px 0 12px;">
+          <label class="ts-qplan-inline-label">Duty in <select id="ts-qsum-quarter">
+            ${summaryQuarterOptions().map(k => `<option value="${k}" ${k===dutySummary.qKey?'selected':''}>${quarterRange(k).label}${k===quarterKeyFor(today)?' (this quarter)':''}</option>`).join('')}
+          </select></label>
+          <label class="ts-qplan-inline-label">Rounds played in <select id="ts-qsum-window">
+            ${ROUNDS_WINDOW_OFFSETS.map(o => `<option value="${o}" ${o===dutySummary.windowOffset?'selected':''}>${roundsWindow(dutySummary.qKey, o).label}</option>`).join('')}
+          </select></label>
+        </div>
+        ${dutySummaryTableHtml(dutySummary.qKey, dutySummary.windowOffset, null, null)}
+        <p class="ts-qplan-sub">Rounds played counts past dates where the player was in the confirmed group, not on standby. Duty days counts every booking day in the quarter, past and upcoming, as currently saved.</p>
+      </div>`;
+  }
+
   function quarterPlanHtml(){
     if(!isAdmin) return '';
     if(!quarterPlan){
@@ -7483,6 +7556,9 @@ function computedCourseHandicap(indexVal, tee){
         <div class="ts-qplan-step">3. Check the dates</div>
         ${days.length ? `
         <p class="ts-qplan-sub" style="margin:0 0 6px;">${openDays} booking day${openDays===1?'':'s'} to cover${unassigned ? `, ${unassigned} still unassigned` : ''}. You can change any date; your changes stay put when you shuffle.</p>
+        <details class="ts-qsum-details" ${plan.summaryOpen ? 'open' : ''} id="ts-qplan-sumdet"><summary>Summary: rounds played and duty days per player</summary>
+          ${dutySummaryTableHtml(plan.qKey, plan.windowOffset, plan.picks, plan.includeIds)}
+        </details>
         <div class="ts-qplan-links"><button class="ts-link-btn" id="ts-qplan-shuffle">Shuffle (new random draw)</button></div>
         <div class="ts-qplan-grid">${rowsHtml}</div>
         <div class="ts-swap-actions">
@@ -7645,6 +7721,7 @@ function computedCourseHandicap(indexVal, tee){
         ${incomingHtml}
         ${swapSectionHtml}
         ${quarterPlanHtml()}
+        ${dutySummaryHtml()}
         <div class="ts-duty-controls">
           <div class="ts-duty-sort">
             <button class="ts-duty-sort-btn ${dutySort==='calendar'?'active':''}" data-duty-sort="calendar">Calendar view</button>
@@ -9347,6 +9424,16 @@ function computedCourseHandicap(indexVal, tee){
         qResuggest();
       });
     });
+    const qSumDet = document.getElementById('ts-qplan-sumdet');
+    if(qSumDet) qSumDet.addEventListener('toggle', () => { if(quarterPlan) quarterPlan.summaryOpen = qSumDet.open; });
+    const qsOpen = document.getElementById('ts-qsum-open');
+    if(qsOpen) qsOpen.addEventListener('click', () => { dutySummary = { qKey: quarterKeyFor(new Date()), windowOffset: ROUNDS_WINDOW_OFFSETS[0] }; render(); });
+    const qsClose = document.getElementById('ts-qsum-close');
+    if(qsClose) qsClose.addEventListener('click', () => { dutySummary = null; render(); });
+    const qsQuarter = document.getElementById('ts-qsum-quarter');
+    if(qsQuarter) qsQuarter.addEventListener('change', () => { dutySummary.qKey = qsQuarter.value; render(); });
+    const qsWindow = document.getElementById('ts-qsum-window');
+    if(qsWindow) qsWindow.addEventListener('change', () => { dutySummary.windowOffset = parseInt(qsWindow.value, 10); render(); });
     const qSave = document.getElementById('ts-qplan-save');
     if(qSave) qSave.addEventListener('click', () => saveQuarterPlan());
 

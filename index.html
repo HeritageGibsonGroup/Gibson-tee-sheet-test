@@ -2007,7 +2007,7 @@
   let expandCollapseState = null; // 'expand' | 'collapse' | null — just for the subtle indicator
   let activeSection = 'schedule'; // 'schedule' | 'duty' | 'handicaps' | 'scoring' | 'comms' | 'admin'
   let activityLogView = 'upcoming'; // Admin > Activity Log: 'upcoming' | 'past'
-  let adminSubTab = 'roster'; // 'roster' | 'closures' | 'pastDuty' | 'activityLog' | 'data' | 'reminders' | 'handicaps'
+  let adminSubTab = 'roster'; // 'roster' | 'closures' | 'planDuty' | 'pastDuty' | 'activityLog' | 'data' | 'reminders' | 'handicaps'
   let scoringSelectedDate = null; // dateKey currently shown on the Scoring & Bets tab — always the upcoming round unless reviewDateKey (below) pins it to a past one
   // Set by "Review prior rounds" — null means Scoring & Bets always follows
   // whatever the current upcoming round is (no picker shown for that, by
@@ -5133,6 +5133,7 @@ function computedCourseHandicap(indexVal, tee){
           <div class="ts-subtabbar">
             <button class="ts-subtab ${adminSubTab==='roster'?'active':''}" data-subtab="roster">League Roster</button>
             <button class="ts-subtab ${adminSubTab==='closures'?'active':''}" data-subtab="closures">Course Information</button>
+            <button class="ts-subtab ${adminSubTab==='planDuty'?'active':''}" data-subtab="planDuty">Plan Booking Duty</button>
             <button class="ts-subtab ${adminSubTab==='pastDuty'?'active':''}" data-subtab="pastDuty">Past Booking Duty</button>
             <button class="ts-subtab ${adminSubTab==='activityLog'?'active':''}" data-subtab="activityLog">Activity Log</button>
             <button class="ts-subtab ${adminSubTab==='data'?'active':''}" data-subtab="data">Data Import/Export &amp; Comparison</button>
@@ -5213,6 +5214,7 @@ function computedCourseHandicap(indexVal, tee){
       const contentEl = document.getElementById('ts-admin-content');
       if(adminSubTab === 'roster') renderRosterPanel(contentEl);
       else if(adminSubTab === 'closures') renderCourseInfoPanel(contentEl, schedule);
+      else if(adminSubTab === 'planDuty') renderPlanDutyPanel(contentEl);
       else if(adminSubTab === 'pastDuty') renderPastDutyPanel(contentEl);
       else if(adminSubTab === 'activityLog') renderActivityLogPanel(contentEl);
       else if(adminSubTab === 'data') renderDataPanel(contentEl);
@@ -7330,7 +7332,9 @@ function computedCourseHandicap(indexVal, tee){
     todo.forEach(({ d, i }) => {
       const candidates = ids.filter(id => targets[id] > 0);
       if(!candidates.length){ picks[d.playKey] = ''; return; }
-      const neighbors = [days[i-1], days[i+1]].filter(Boolean).map(n => picks[n.playKey]).filter(Boolean);
+      // Nearest open booking day on each side (a closed day in between doesn't count as a gap).
+      const nearOpen = (step) => { let j = i + step; while(days[j] && days[j].closed) j += step; return days[j]; };
+      const neighbors = [nearOpen(-1), nearOpen(1)].filter(Boolean).map(x => picks[x.playKey]).filter(Boolean);
       const dow = d.bookDate.getDay();
       // Loosen the rules only as far as needed to find someone.
       const tiers = [
@@ -7441,6 +7445,12 @@ function computedCourseHandicap(indexVal, tee){
         ${dutySummaryTableHtml(dutySummary.qKey, dutySummary.windowOffset, null, null)}
         <p class="ts-qplan-sub">Rounds played counts past dates where the player was in the confirmed group, not on standby. Duty days counts every booking day in the quarter, past and upcoming, as currently saved.</p>
       </div>`;
+  }
+
+  // Admin > Plan Booking Duty: the quarter planner and the rounds/duty summary.
+  function renderPlanDutyPanel(el){
+    if(!isAdmin){ el.innerHTML = ''; return; }
+    el.innerHTML = `<div class="ts-roster-panel">${quarterPlanHtml()}${dutySummaryHtml()}</div>`;
   }
 
   function quarterPlanHtml(){
@@ -7720,8 +7730,6 @@ function computedCourseHandicap(indexVal, tee){
         </div>
         ${incomingHtml}
         ${swapSectionHtml}
-        ${quarterPlanHtml()}
-        ${dutySummaryHtml()}
         <div class="ts-duty-controls">
           <div class="ts-duty-sort">
             <button class="ts-duty-sort-btn ${dutySort==='calendar'?'active':''}" data-duty-sort="calendar">Calendar view</button>

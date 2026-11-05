@@ -696,6 +696,30 @@
   .ts-swap-send{ background:var(--fairway); color:#fff; border:none; border-radius:7px; padding:10px 18px; font-family:'Inter'; font-size:14px; font-weight:600; cursor:pointer; }
   @media (max-width:560px){ .ts-swap-grid{ grid-template-columns:minmax(0,1fr); } .ts-swap-grid > div:nth-child(1){ padding-bottom:0; border-bottom:none; } .ts-swap-date{ border-bottom:none !important; padding-bottom:2px !important; } }
   .ts-link-btn{ background:none; border:none; padding:0; text-decoration:underline; color:var(--fairway); cursor:pointer; font-family:'Inter'; font-size:13px; }
+  /* Plan a quarter (admin): fill a whole quarter's booking duty at once */
+  .ts-qplan{ border:1px solid var(--ivory-line); border-radius:10px; padding:14px 16px; margin:0 0 14px; background:#FCFAF4; }
+  .ts-qplan-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .ts-qplan-head h4{ margin:0 !important; font-family:'Inter',sans-serif !important; font-size:15px !important; font-weight:600; }
+  .ts-qplan-sub{ font-size:13px; color:#6b6a5e; margin:4px 0 0; line-height:1.5; }
+  .ts-qplan-step{ font-size:11px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:#6b6a5e; margin:16px 0 6px; }
+  .ts-qplan select{ font-family:'Inter'; font-size:14px; padding:8px 10px; border-radius:7px; border:1px solid var(--ivory-line); background:#fff; max-width:100%; }
+  .ts-qplan-check{ display:flex; align-items:center; gap:8px; font-size:14px; margin-top:10px; }
+  .ts-qplan-players{ display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:4px 14px; }
+  .ts-qplan-players label{ display:flex; align-items:center; gap:7px; font-size:14px; padding:3px 0; min-width:0; }
+  .ts-qplan-players label span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ts-qplan-links{ display:flex; gap:14px; margin-bottom:6px; }
+  .ts-qplan-counts{ display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 10px; }
+  .ts-qplan-count{ font-size:12px; background:#fff; border:1px solid var(--ivory-line); border-radius:999px; padding:3px 10px; }
+  .ts-qplan-count b{ color:var(--fairway); }
+  .ts-qplan-grid{ display:grid; grid-template-columns:minmax(120px, 200px) minmax(0, 1fr); column-gap:16px; align-items:center; }
+  .ts-qplan-grid > div{ padding:7px 0; border-bottom:1px solid var(--ivory-line); min-width:0; }
+  .ts-qplan-grid select{ width:100%; max-width:420px; }
+  .ts-qplan-date b{ display:block; font-size:15px; }
+  .ts-qplan-date span{ font-size:12px; color:#6b6a5e; }
+  .ts-qplan-tag{ display:inline-block; font-size:11px; font-weight:600; color:#3E6B3A; background:#E4EFE1; border-radius:999px; padding:2px 8px; margin-left:8px; }
+  .ts-qplan-closed{ font-size:13px; color:var(--rust); font-weight:600; }
+  .ts-qplan-month{ grid-column:1 / -1; font-size:13px; font-weight:600; color:var(--fairway); padding-top:14px !important; }
+  @media (max-width:560px){ .ts-qplan-grid{ grid-template-columns:minmax(0,1fr); } .ts-qplan-date{ border-bottom:none !important; padding-bottom:2px !important; } }
   .ts-duty-sort-btn{
     font-family:'Inter',sans-serif; font-size:12px; font-weight:500; color:#6b6a5e;
     background:var(--ivory); border:1px solid var(--ivory-line); border-radius:16px; padding:6px 12px; cursor:pointer;
@@ -879,7 +903,7 @@
     .ts-warn-banner, .ts-test-banner, #ts-modal-root, .ts-header::after,
     .ts-whoami, .ts-pin-link, .ts-topbar, .ts-reminders, .ts-tabbar, .ts-footer-note,
     .ts-print-btn, .ts-toggle-wrap, .ts-holes-group, .ts-admin-add, .chip-remove,
-    .ts-duty-sort, #ts-duty-filter, #ts-schedule-filter, .ts-swap-btn, .ts-swap-pending, .ts-swap-section,
+    .ts-duty-sort, #ts-duty-filter, #ts-schedule-filter, .ts-swap-btn, .ts-swap-pending, .ts-swap-section, .ts-qplan,
     .ts-admin-pill, .ts-add-row, .ts-import-row, #ts-new-name, #ts-add-player, .ts-player-action-select,
     .ts-subtabbar, .ts-accept-teams-wrap {
       display:none !important;
@@ -963,7 +987,7 @@
   // Shown in the top-right corner next to the script's own SCRIPT_VERSION, so
   // it's easy to see which page and script versions a site is running.
   // Bump it with every change to this file.
-  const APP_VERSION = '2026.10.27';
+  const APP_VERSION = '2026.11.05';
   const PLAY_DOWS = [1,3,5]; // Mon, Wed, Fri
   const HOLES_CYCLE = ['18','F9','B9'];
   const HOLES_LABEL = { '18': '18 holes', 'F9': 'Front 9', 'B9': 'Back 9' };
@@ -2036,6 +2060,10 @@
     }
     return false;
   }
+  // Booking Duty "Plan a quarter" box (admin only). null = closed. When open:
+  // { qKey:'2027-Q1', includeIds:[player ids in the rotation], replaceExisting:bool,
+  //   picks:{ playKey: playerId|'' } } — picks is the preview, saved only on Save.
+  let quarterPlan = null;
   let swapShowAllDates = false; // swap section shows the first 3 of my dates until "Show more dates..."
   let swapPicks = {}; // Booking Duty swap section: my play-date key -> the play-date key I picked to trade for
   // Upcoming Dates and Booking Duty open to whichever view was last picked on
@@ -2062,6 +2090,7 @@
 
   const DOW_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const MON_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const FULL_MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
   function fmtDateKey(d){
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
@@ -7121,6 +7150,216 @@ function computedCourseHandicap(indexVal, tee){
     return dates;
   }
 
+  // ---- Plan a quarter: fill a whole quarter's booking duty in one go ----
+  // Quarters go by BOOKING day (the date on the Booking Duty list), the same
+  // way everyone thinks about duty. Duty itself is still stored by the round
+  // (booking day + BOOKING_WINDOW_DAYS), exactly like the one-at-a-time dropdowns.
+  function quarterKeyFor(d){ return d.getFullYear() + '-Q' + (Math.floor(d.getMonth()/3) + 1); }
+  function quarterRange(qKey){
+    const [y, q] = qKey.split('-Q').map(Number);
+    const start = new Date(y, (q-1)*3, 1);
+    const end = new Date(y, (q-1)*3 + 3, 0);
+    return { start, end, label: `${MON_NAMES[start.getMonth()]} – ${MON_NAMES[end.getMonth()]} ${y}` };
+  }
+  // This quarter (whatever's left of it) plus the next three.
+  function quarterOptions(){
+    const today = new Date(); today.setHours(0,0,0,0);
+    const out = [];
+    let cursor = new Date(today.getFullYear(), Math.floor(today.getMonth()/3)*3, 1);
+    for(let i = 0; i < 4; i++){
+      out.push(quarterKeyFor(cursor));
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 3, 1);
+    }
+    return out;
+  }
+  function defaultQuarterKey(){ return quarterOptions()[1]; } // next quarter = "in advance"
+  // Booking days in the quarter that haven't passed yet, each with its round.
+  function quarterDutyDays(qKey){
+    const today = new Date(); today.setHours(0,0,0,0);
+    const { start, end } = quarterRange(qKey);
+    const days = [];
+    let cursor = new Date(Math.max(start, today));
+    while(cursor <= end){
+      if(PLAY_DOWS.includes(cursor.getDay())){
+        const bookDate = new Date(cursor);
+        const playDate = new Date(bookDate); playDate.setDate(playDate.getDate() + BOOKING_WINDOW_DAYS);
+        const playKey = fmtDateKey(playDate);
+        days.push({ bookDate, playDate, playKey, closed: !!data.closures[playKey] });
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return days;
+  }
+  function defaultRotationIds(){ return sortedRoster().filter(p => !p.isGuest).map(p => p.id); }
+
+  // Works out a fair spread for the quarter and stores it in quarterPlan.picks.
+  // Rules, in order: dates already assigned are left alone (unless "replace" is
+  // ticked); closed rounds get no one; each open date goes to whoever in the
+  // rotation has the fewest duties this quarter so far; ties go to whoever had
+  // fewer duties last quarter, then whoever's last duty was longest ago, then a
+  // coin flip (so "Shuffle" gives a different but still even spread). Nobody is
+  // given two booking days in a row unless there's no one else.
+  function suggestQuarterPlan(){
+    const plan = quarterPlan;
+    const days = quarterDutyDays(plan.qKey);
+    const ids = plan.includeIds.filter(id => data.roster.some(p => p.id === id));
+    const picks = {};
+    const thisQ = {}; ids.forEach(id => thisQ[id] = 0);
+    const lastQ = {}; ids.forEach(id => lastQ[id] = 0);
+    const lastTime = {}; ids.forEach(id => lastTime[id] = 0);
+    const tieBreak = {}; ids.forEach(id => tieBreak[id] = Math.random());
+
+    // Last quarter's duty counts (rounds in the 3 months before this quarter's first round).
+    const { start } = quarterRange(plan.qKey);
+    const firstPlay = new Date(start); firstPlay.setDate(firstPlay.getDate() + BOOKING_WINDOW_DAYS);
+    const prevStart = new Date(firstPlay); prevStart.setMonth(prevStart.getMonth() - 3);
+    const firstKey = fmtDateKey(firstPlay), prevKey = fmtDateKey(prevStart);
+    Object.keys(data.duty || {}).forEach(k => {
+      const id = data.duty[k];
+      if(!(id in lastQ) || data.closures[k]) return;
+      if(k < firstKey){
+        const t = new Date(k + 'T00:00:00').getTime();
+        if(t > lastTime[id]) lastTime[id] = t;
+        if(k >= prevKey) lastQ[id]++;
+      }
+    });
+
+    // Keep what's already set first, so it counts toward everyone's total.
+    days.forEach(d => {
+      if(d.closed){ picks[d.playKey] = ''; return; }
+      const existing = data.duty[d.playKey];
+      if(!plan.replaceExisting && existing && data.roster.some(p => p.id === existing)){
+        picks[d.playKey] = existing;
+        if(existing in thisQ) thisQ[existing]++;
+      }
+    });
+
+    days.forEach((d, i) => {
+      if(d.closed || picks[d.playKey] !== undefined) return;
+      if(!ids.length){ picks[d.playKey] = ''; return; }
+      const neighbors = [days[i-1], days[i+1]].filter(Boolean).map(n => picks[n.playKey]).filter(Boolean);
+      let pool = ids.filter(id => !neighbors.includes(id));
+      if(!pool.length) pool = ids;
+      pool.sort((a, b) => (thisQ[a] - thisQ[b]) || (lastQ[a] - lastQ[b]) || (lastTime[a] - lastTime[b]) || (tieBreak[a] - tieBreak[b]));
+      const id = pool[0];
+      picks[d.playKey] = id;
+      thisQ[id]++;
+      lastTime[id] = d.playDate.getTime();
+    });
+    plan.picks = picks;
+  }
+
+  function openQuarterPlan(){
+    quarterPlan = { qKey: defaultQuarterKey(), includeIds: defaultRotationIds(), replaceExisting: false, picks: {} };
+    suggestQuarterPlan();
+  }
+
+  async function saveQuarterPlan(){
+    if(!isAdmin || !quarterPlan) return;
+    const days = quarterDutyDays(quarterPlan.qKey);
+    const { label } = quarterRange(quarterPlan.qKey);
+    let set = 0, cleared = 0;
+    days.forEach(d => {
+      if(d.closed) return;
+      const id = quarterPlan.picks[d.playKey] || '';
+      if(id){ if(data.duty[d.playKey] !== id){ data.duty[d.playKey] = id; } set++; }
+      else if(data.duty[d.playKey]){ delete data.duty[d.playKey]; cleared++; }
+    });
+    const unassigned = days.filter(d => !d.closed && !quarterPlan.picks[d.playKey]).length;
+    await saveData();
+    quarterPlan = null;
+    render();
+    await showMessage('Booking duty saved',
+      `${set} booking day${set===1?'':'s'} in ${label} now ${set===1?'has':'have'} someone on duty.` +
+      (unassigned ? ` ${unassigned} ${unassigned===1?'is':'are'} still unassigned.` : '') +
+      ' Players can see their dates on the Booking Duty tab, and swaps work as usual.');
+  }
+
+  function quarterPlanHtml(){
+    if(!isAdmin) return '';
+    if(!quarterPlan){
+      return `<div class="ts-qplan">
+          <div class="ts-qplan-head">
+            <h4>Plan a quarter</h4>
+            <button class="ts-swap-send" id="ts-qplan-open">Plan a quarter's duties</button>
+          </div>
+          <p class="ts-qplan-sub">Fill in booking duty for a whole quarter at once, shared out evenly. You'll see a preview before anything is saved.</p>
+        </div>`;
+    }
+    const plan = quarterPlan;
+    const days = quarterDutyDays(plan.qKey);
+    const { label } = quarterRange(plan.qKey);
+    const today = new Date(); today.setHours(0,0,0,0);
+    const dayLabel = (dt) => `${DOW_NAMES[dt.getDay()]}, ${MON_NAMES[dt.getMonth()]} ${dt.getDate()}`;
+    const roster = sortedRoster();
+
+    const quarterSelect = `<select id="ts-qplan-quarter">
+        ${quarterOptions().map(k => {
+          const r = quarterRange(k);
+          const thisOne = k === quarterKeyFor(today);
+          return `<option value="${k}" ${k===plan.qKey?'selected':''}>${r.label}${thisOne ? ' (rest of this quarter)' : ''}</option>`;
+        }).join('')}
+      </select>`;
+
+    const playersHtml = roster.map(p => `
+        <label><input type="checkbox" data-qplan-player="${p.id}" ${plan.includeIds.includes(p.id)?'checked':''}><span>${playerLabel(p)}${p.isGuest ? ' (guest)' : ''}</span></label>`).join('');
+
+    // Per-person totals for the preview (only open dates).
+    const counts = {};
+    days.forEach(d => { const id = plan.picks[d.playKey]; if(!d.closed && id) counts[id] = (counts[id]||0) + 1; });
+    const countsHtml = roster.filter(p => counts[p.id] || plan.includeIds.includes(p.id))
+      .map(p => `<span class="ts-qplan-count">${playerLabel(p)} <b>${counts[p.id]||0}</b></span>`).join('');
+    const openDays = days.filter(d => !d.closed).length;
+    const unassigned = days.filter(d => !d.closed && !plan.picks[d.playKey]).length;
+
+    let lastMonth = -1;
+    const rowsHtml = days.map(d => {
+      let monthHead = '';
+      if(d.bookDate.getMonth() !== lastMonth){
+        lastMonth = d.bookDate.getMonth();
+        monthHead = `<div class="ts-qplan-month">${FULL_MONTH_NAMES[lastMonth]}</div>`;
+      }
+      const kept = !plan.replaceExisting && data.duty[d.playKey] && plan.picks[d.playKey] === data.duty[d.playKey];
+      const control = d.closed
+        ? `<span class="ts-qplan-closed">Course closed for this round. No duty needed.</span>`
+        : `<select data-qplan-pick="${d.playKey}">
+             <option value="">Unassigned</option>
+             ${roster.map(p => `<option value="${p.id}" ${plan.picks[d.playKey]===p.id?'selected':''}>${playerLabel(p)}</option>`).join('')}
+           </select>${kept ? '<span class="ts-qplan-tag">Already set</span>' : ''}`;
+      return `${monthHead}<div class="ts-qplan-date"><b>${dayLabel(d.bookDate)}</b><span>for the ${dayLabel(d.playDate)} round</span></div><div>${control}</div>`;
+    }).join('');
+
+    return `<div class="ts-qplan">
+        <div class="ts-qplan-head">
+          <h4>Plan a quarter: ${label}</h4>
+          <button class="ts-link-btn" id="ts-qplan-cancel">Close without saving</button>
+        </div>
+        <p class="ts-qplan-sub">Nothing changes until you press Save. Dates are booking days, the days someone goes to the pro shop.</p>
+
+        <div class="ts-qplan-step">1. Quarter</div>
+        ${quarterSelect}
+        <label class="ts-qplan-check"><input type="checkbox" id="ts-qplan-replace" ${plan.replaceExisting?'checked':''}> Also redo dates that already have someone assigned</label>
+
+        <div class="ts-qplan-step">2. Who's in the rotation (${plan.includeIds.length})</div>
+        <div class="ts-qplan-links">
+          <button class="ts-link-btn" id="ts-qplan-all">Select all</button>
+          <button class="ts-link-btn" id="ts-qplan-none">Clear all</button>
+        </div>
+        <div class="ts-qplan-players">${playersHtml}</div>
+
+        <div class="ts-qplan-step">3. Check the dates</div>
+        ${days.length ? `
+        <p class="ts-qplan-sub" style="margin:0 0 6px;">${openDays} booking day${openDays===1?'':'s'} to cover${unassigned ? `, ${unassigned} still unassigned` : ''}. Duties per person:</p>
+        <div class="ts-qplan-counts">${countsHtml || '<span class="ts-qplan-sub" style="margin:0;">Tick at least one player above.</span>'}</div>
+        <div class="ts-qplan-links"><button class="ts-link-btn" id="ts-qplan-shuffle">Shuffle (new even spread)</button></div>
+        <div class="ts-qplan-grid">${rowsHtml}</div>
+        <div class="ts-swap-actions">
+          <button class="ts-swap-send" id="ts-qplan-save">Save ${label} duties</button>
+          <button class="ts-link-btn" id="ts-qplan-cancel2">Cancel</button>
+        </div>` : `<p class="ts-qplan-sub">No booking days left in this quarter.</p>`}
+      </div>`;
+  }
+
   function renderDutyPanel(el, schedule){
     const today = new Date(); today.setHours(0,0,0,0);
     let rows = schedule.map(d => buildDutyRow(d, today));
@@ -7273,6 +7512,7 @@ function computedCourseHandicap(indexVal, tee){
         </div>
         ${incomingHtml}
         ${swapSectionHtml}
+        ${quarterPlanHtml()}
         <div class="ts-duty-controls">
           <div class="ts-duty-sort">
             <button class="ts-duty-sort-btn ${dutySort==='calendar'?'active':''}" data-duty-sort="calendar">Calendar view</button>
@@ -8897,6 +9137,37 @@ function computedCourseHandicap(indexVal, tee){
     });
     const sendSwapsBtn = document.getElementById('ts-send-swaps');
     if(sendSwapsBtn) sendSwapsBtn.addEventListener('click', async () => { await sendSwapRequests(); render(); });
+    // Plan a quarter (Booking Duty tab, admin only)
+    const qOpen = document.getElementById('ts-qplan-open');
+    if(qOpen) qOpen.addEventListener('click', () => { openQuarterPlan(); render(); });
+    ['ts-qplan-cancel', 'ts-qplan-cancel2'].forEach(id => {
+      const b = document.getElementById(id);
+      if(b) b.addEventListener('click', () => { quarterPlan = null; render(); });
+    });
+    const qQuarter = document.getElementById('ts-qplan-quarter');
+    if(qQuarter) qQuarter.addEventListener('change', () => { quarterPlan.qKey = qQuarter.value; suggestQuarterPlan(); render(); });
+    const qReplace = document.getElementById('ts-qplan-replace');
+    if(qReplace) qReplace.addEventListener('change', () => { quarterPlan.replaceExisting = qReplace.checked; suggestQuarterPlan(); render(); });
+    document.querySelectorAll('[data-qplan-player]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const id = cb.getAttribute('data-qplan-player');
+        quarterPlan.includeIds = quarterPlan.includeIds.filter(x => x !== id);
+        if(cb.checked) quarterPlan.includeIds.push(id);
+        suggestQuarterPlan(); render();
+      });
+    });
+    const qAll = document.getElementById('ts-qplan-all');
+    if(qAll) qAll.addEventListener('click', () => { quarterPlan.includeIds = data.roster.map(p => p.id); suggestQuarterPlan(); render(); });
+    const qNone = document.getElementById('ts-qplan-none');
+    if(qNone) qNone.addEventListener('click', () => { quarterPlan.includeIds = []; suggestQuarterPlan(); render(); });
+    const qShuffle = document.getElementById('ts-qplan-shuffle');
+    if(qShuffle) qShuffle.addEventListener('click', () => { suggestQuarterPlan(); render(); });
+    document.querySelectorAll('[data-qplan-pick]').forEach(sel => {
+      sel.addEventListener('change', () => { quarterPlan.picks[sel.getAttribute('data-qplan-pick')] = sel.value; render(); });
+    });
+    const qSave = document.getElementById('ts-qplan-save');
+    if(qSave) qSave.addEventListener('click', () => saveQuarterPlan());
+
     const swapMoreBtn = document.getElementById('ts-swap-more');
     if(swapMoreBtn) swapMoreBtn.addEventListener('click', () => { swapShowAllDates = true; render(); });
     const clearSwapsBtn = document.getElementById('ts-clear-swaps');

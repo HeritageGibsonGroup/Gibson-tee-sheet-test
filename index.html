@@ -1028,11 +1028,11 @@
   const GOLF_TOMORROW_EXTRA_CC = ['stevekirchhoff52@gmail.com', 'rtleene@aol.com'];
   const BOOKING_WINDOW_DAYS = 14; // club allows booking 2 weeks ahead
   const WEEKS_AHEAD = 52;
-  const VERSION_DATE = 'November 13, 2026'; // update this each time a change is promoted to live
+  const VERSION_DATE = 'November 16, 2026'; // update this each time a change is promoted to live
   // Shown in the top-right corner next to the script's own SCRIPT_VERSION, so
   // it's easy to see which page and script versions a site is running.
   // Bump it with every change to this file.
-  const APP_VERSION = '2026.11.13';
+  const APP_VERSION = '2026.11.16';
   const PLAY_DOWS = [1,3,5]; // Mon, Wed, Fri
   const HOLES_CYCLE = ['18','F9','B9'];
   const HOLES_LABEL = { '18': '18 holes', 'F9': 'Front 9', 'B9': 'Back 9' };
@@ -1147,13 +1147,13 @@
   // standby — the backend does the actual sending (client JS can't send mail
   // directly). Fails silently if the network hiccups; this is a nice-to-have
   // notification, not something that should block the signup change itself.
-  async function notifyPromoted(dateKey, playerIds){
+  async function notifyPromoted(dateKey, playerIds, bumpedIds){
     try{
       const url = `${BACKEND_URL}?key=${encodeURIComponent(BACKEND_KEY)}&action=notify_promotion`;
       await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ dateKey, playerIds })
+        body: JSON.stringify({ dateKey, playerIds, bumpedIds: bumpedIds || [] })
       });
     }catch(e){ /* best-effort */ }
   }
@@ -1244,6 +1244,7 @@
     const todayKey = fmtDateKey(new Date());
     const next = {};
     const promoted = [];
+    const bumped = [];
     Object.keys(data.signups || {}).sort().forEach(key => {
       if(key < todayKey || (data.closures && data.closures[key])) return;
       const list = data.signups[key] || [];
@@ -1251,12 +1252,18 @@
       const status = splitConfirmedStandby(list, capacityFor(key)).confirmed.some(x => x.id === meId) ? 'confirmed' : 'standby';
       next[key] = status;
       if(prev[key] === 'standby' && status === 'confirmed') promoted.push(key);
+      const mine = list.find(x => x.id === meId);
+      if(prev[key] === 'confirmed' && status === 'standby' && mine && mine.holes !== '18') bumped.push(key);
     });
     all[meId] = next;
     try{ localStorage.setItem(SIGNUP_STATUS_KEY, JSON.stringify(all)); }catch(e){}
     if(promoted.length){
       const labels = promoted.map(k => { const d = new Date(k + 'T00:00:00'); return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); });
       await showMessage("You're in!", "A spot opened up — you're no longer on standby and are now confirmed to play on " + labels.join(' and ') + '.');
+    }
+    if(bumped.length){
+      const labels = bumped.map(k => { const d = new Date(k + 'T00:00:00'); return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); });
+      await showMessage("You're on standby", "The tee times for " + labels.join(' and ') + " are full and an 18-hole player wanted to play, so your nine-hole spot went to them. You're first in line if a spot opens up, or switch to 18 holes to get back in.");
     }
   }
 
@@ -2232,6 +2239,9 @@
       if(Array.isArray(info.notInBet)){
         const beforeCount = info.notInBet.length;
         info.notInBet = info.notInBet.filter(p => !p || signedUpIds.has(p.id));
+        // A nine-hole player bumped to standby by an 18-hole player isn't playing.
+        const benchedNine = new Set(splitConfirmedStandby(data.signups[dateKey] || [], capacityFor(dateKey)).standby.filter(e => e.holes !== '18').map(e => e.id));
+        info.notInBet = info.notInBet.filter(p => !p || !benchedNine.has(p.id));
         healed += beforeCount - info.notInBet.length;
       }
       // The mirror image of the removal above: add anyone newly signed up — and
@@ -2612,9 +2622,41 @@
     if(signedUpCount === 0) return null;
     return Math.min(MAX_TEE_TIMES, Math.ceil(signedUpCount / PLAYERS_PER_TEE_TIME)) * PLAYERS_PER_TEE_TIME;
   }
+  // Full day: an 18-hole player waiting on standby takes the spot of a nine-hole
+  // player (Tom, Nov 16, 2026). The nine-hole player who signed up most recently
+  // goes first; the 18-hole player who has waited longest comes in first. Both
+  // lists keep signup order, so if a spot opens later the bumped nine-hole
+  // player is first back in. Nine-hole players on standby never bump anyone.
+  // Code_*.gs has the same rule in splitConfirmedStandby_ — keep them matching.
   function splitConfirmedStandby(entries, capacity){
     if(capacity == null) return { confirmed: entries, standby: [] };
-    return { confirmed: entries.slice(0, capacity), standby: entries.slice(capacity) };
+    const inIdx = new Set(entries.slice(0, capacity).map((_, i) => i));
+    const nineIn = [...inIdx].filter(i => entries[i].holes !== '18');
+    const eighteenOut = entries.map((e, i) => i).filter(i => i >= capacity && entries[i].holes === '18');
+    while(nineIn.length && eighteenOut.length){
+      inIdx.delete(nineIn.pop());
+      inIdx.add(eighteenOut.shift());
+    }
+    return {
+      confirmed: entries.filter((e, i) => inIdx.has(i)),
+      standby: entries.filter((e, i) => !inIdx.has(i))
+    };
+  }
+  function confirmedIdsFor(key){
+    return splitConfirmedStandby(data.signups[key] || [], capacityFor(key)).confirmed.map(x => x.id);
+  }
+  // After a signup, an add, or a change between 18 and nine holes: whoever moved
+  // from standby to confirmed gets the usual "you're off standby" email, and any
+  // nine-hole player who lost their spot to an 18-hole player is told too.
+  // joinedId is someone who just signed up; they only get an email when they
+  // bumped someone (an ordinary signup never sends one).
+  function notifyStatusChanges(key, beforeConfirmedIds, beforeSignedUpIds, joinedId){
+    const list = data.signups[key] || [];
+    const stillIn = new Set(list.map(x => x.id));
+    const after = confirmedIdsFor(key);
+    const bumped = beforeConfirmedIds.filter(id => stillIn.has(id) && !after.includes(id));
+    const promoted = after.filter(id => !beforeConfirmedIds.includes(id) && (beforeSignedUpIds.includes(id) || (bumped.length && id === joinedId)));
+    if(promoted.length || bumped.length) notifyPromoted(key, promoted, bumped);
   }
 
   // First tee times change a few times a year and then hold steady — admin enters each
@@ -5397,7 +5439,7 @@ function computedCourseHandicap(indexVal, tee){
       const namesHtml = capacity != null
         ? `<div class="ts-chip-group-label">${confirmed.length} golfer${confirmed.length===1?'':'s'} signed up</div>${chipsFor(sortByLastName(confirmed))}
            ${standby.length ? `<div class="ts-chip-group-label standby">Standby (${standby.length})</div>${chipsFor(sortByLastName(standby))}
-           <div class="ts-note" style="border-top:none; padding-top:0; margin-top:4px;">Sorted by signup order for now — who's actually sitting out for ${DOW_NAMES[d.getDay()]}, ${MON_NAMES[d.getMonth()]} ${d.getDate()} hasn't been decided yet.</div>` : ''}`
+           <div class="ts-note" style="border-top:none; padding-top:0; margin-top:4px;">Sorted by signup order for now, with 18-hole players ahead of nine-hole players — who's actually sitting out for ${DOW_NAMES[d.getDay()]}, ${MON_NAMES[d.getMonth()]} ${d.getDate()} hasn't been decided yet.</div>` : ''}`
         : chipsFor(sortByLastName(signedEntries));
 
       const rosterIdsSignedUp = signedEntries.map(e => e.id);
@@ -5490,7 +5532,7 @@ function computedCourseHandicap(indexVal, tee){
       // themselves from a date).
       const inOptionLabel = mySignup
         ? (iAmStandby ? "On standby ✓" : "I'm in ✓")
-        : (capacity != null && confirmed.length >= capacity ? "Join standby list" : "I'm in");
+        : (capacity != null && confirmed.length >= capacity && !confirmed.some(e => e.holes !== '18') ? "Join standby list" : "I'm in");
       const outOptionLabel = mySignup ? "Remove me" : "Not playing";
 
       // Show whatever tee this signup is actually saved as; if none was ever set for
@@ -9737,16 +9779,25 @@ function computedCourseHandicap(indexVal, tee){
         const capacity = capacityFor(key);
         const wantIn = sel.value === 'in';
         if(wantIn && idx === -1){
+          const beforeConfirmedIds = splitConfirmedStandby(list, capacity).confirmed.map(x => x.id);
+          const beforeSignedUpIds = list.map(x => x.id);
           const me = data.roster.find(p => p.id === meId);
           const entry = { id: meId, holes: '18' };
           if(me && me.defaultTee) entry.tee = me.defaultTee;
           list.push(entry);
+          // Full day with a nine-hole player in it: joining for 18 takes their
+          // spot, so check the player really wants 18 before anyone is bumped.
+          if(beforeConfirmedIds.some(id => !confirmedIdsFor(key).includes(id))){
+            const play18 = await askConfirm('This day is full', "Signing up for 18 holes moves a nine-hole player to the standby list and gives you their spot. If you only want nine holes, you'll go on standby instead.", 'Play 18', 'Play nine');
+            if(!play18) entry.holes = 'F9';
+          }
           logActivity('signup', { dateKey: key });
           // If teams were already generated for this date and there's room
           // (within confirmed tee times), reconcile them right away so this
           // signup shows up in Swap players instead of waiting for a page
           // reload — see normalizeTeams().
           normalizeTeams();
+          notifyStatusChanges(key, beforeConfirmedIds, beforeSignedUpIds, meId);
         } else if(!wantIn && idx !== -1){
           const beforeConfirmedIds = splitConfirmedStandby(list, capacity).confirmed.map(x => x.id);
           const droppedPlayer = data.roster.find(p => p.id === meId);
@@ -9785,8 +9836,21 @@ function computedCourseHandicap(indexVal, tee){
         if(!meId) return;
         const [key, holes] = btn.getAttribute('data-holes-set').split('|');
         const entry = findSignup(key, meId);
-        if(!entry) return;
+        if(!entry || entry.holes === holes) return;
+        const beforeConfirmedIds = confirmedIdsFor(key);
+        const beforeSignedUpIds = (data.signups[key] || []).map(x => x.id);
+        const oldHoles = entry.holes;
         entry.holes = holes;
+        // Switching to nine holes on a full day while an 18-hole player waits
+        // on standby gives that player your spot, so check first.
+        if(beforeConfirmedIds.includes(meId) && !confirmedIdsFor(key).includes(meId)){
+          entry.holes = oldHoles;
+          const ok = await askConfirm('Move to standby?', "This day is full and an 18-hole player is waiting on standby. If you switch to nine holes, they get your spot and you go on the standby list.", 'Switch to nine', 'Keep 18');
+          if(!ok) return;
+          entry.holes = holes;
+        }
+        normalizeTeams();
+        notifyStatusChanges(key, beforeConfirmedIds, beforeSignedUpIds, null);
         await saveData();
         render();
       });
@@ -9845,8 +9909,11 @@ function computedCourseHandicap(indexVal, tee){
         if(!pid) return;
         const list = data.signups[key] || (data.signups[key] = []);
         if(!list.some(x => x.id === pid)){
+          const beforeConfirmedIds = confirmedIdsFor(key);
+          const beforeSignedUpIds = list.map(x => x.id);
           list.push({ id: pid, holes: '18' });
           normalizeTeams();
+          notifyStatusChanges(key, beforeConfirmedIds, beforeSignedUpIds, pid);
         }
         await saveData();
         render();
@@ -9869,8 +9936,11 @@ function computedCourseHandicap(indexVal, tee){
         const id = 'guest_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
         data.roster.push({ id, name: finalName, isGuest: true });
         const list = data.signups[key] || (data.signups[key] = []);
+        const beforeConfirmedIds = confirmedIdsFor(key);
+        const beforeSignedUpIds = list.map(x => x.id);
         list.push({ id, holes: '18' });
         normalizeTeams();
+        notifyStatusChanges(key, beforeConfirmedIds, beforeSignedUpIds, id);
         await saveData();
         render();
       });

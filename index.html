@@ -1031,9 +1031,9 @@
   // out of the bet rather than being folded into a bigger team — e.g. 10
   // players / 3 confirmed tee times = three teams of 3, one sitting out.
   const MAX_BET_TEAM_SIZE = 3;
-  // No bet when five or fewer are playing (Tom, Nov 27, 2026). Counts
-  // everyone playing that day (confirmed, 18 or nine holes), the same
-  // "golfers" number the night-before email uses. Rounds before
+  // No bet when five or fewer are playing (Tom, Nov 27, 2026). Counts only
+  // the confirmed 18-hole players; nine-hole players are left out of the
+  // count (Tom, Nov 27). Rounds before
   // NO_BET_RULE_START keep their money as it was. Code_*.gs has the same
   // rule (noBetFor_) — keep them matching.
   const NO_BET_MAX_PLAYERS = 5;
@@ -3756,12 +3756,13 @@ function computedCourseHandicap(indexVal, tee){
     return { teams, notInBet: [...nineHoleOut, ...oddOneOut], generatedAt: new Date().toISOString() };
   }
 
-  // How many are playing on dateKey: the confirmed players once tee times
-  // are known, otherwise everyone signed up (same as computeTeamsForDate).
+  // How many are playing 18 holes on dateKey: the confirmed players once tee
+  // times are known, otherwise everyone signed up (same as computeTeamsForDate).
+  // Nine-hole players don't count toward the no-bet rule.
   function playingCountFor(dateKey){
     const entries = data.signups[dateKey] || [];
     const { confirmed } = splitConfirmedStandby(entries, capacityFor(dateKey));
-    return (confirmed.length ? confirmed : entries).length;
+    return (confirmed.length ? confirmed : entries).filter(e => e.holes === '18').length;
   }
 
   // True when there's no bet that day: five or fewer playing (see
@@ -3774,7 +3775,7 @@ function computedCourseHandicap(indexVal, tee){
 
   function noBetNoteText(dateKey){
     const n = playingCountFor(dateKey);
-    return `Only ${n} ${n === 1 ? 'player is' : 'players are'} playing, and there's no bet with ${NO_BET_MAX_PLAYERS} or fewer. Scores can still be entered as usual.`;
+    return `Only ${n} ${n === 1 ? 'player is' : 'players are'} playing 18 holes, and there's no bet with ${NO_BET_MAX_PLAYERS} or fewer. Scores can still be entered as usual.`;
   }
 
   // The same lowest-course-handicap baseline computeTeamsForDate would use for
@@ -5809,7 +5810,7 @@ function computedCourseHandicap(indexVal, tee){
       const teamsHtml = generatedTeams ? `
         <div class="ts-teams-block">
           <div class="ts-chip-group-label">Suggested teams</div>
-          ${noBetFor(key) ? `<div class="ts-no-bet-line">No bet: ${NO_BET_MAX_PLAYERS} or fewer playing</div>` : ''}
+          ${noBetFor(key) ? `<div class="ts-no-bet-line">No bet: ${NO_BET_MAX_PLAYERS} or fewer playing 18 holes</div>` : ''}
           ${generatedTeams.teams.map((team, i) => `
             <div class="ts-team-row">
               <span class="ts-team-num">Team ${i+1}</span>
